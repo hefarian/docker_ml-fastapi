@@ -2,10 +2,21 @@
 Tests unitaires et fonctionnels pour l'API de prédiction d'attrition
 """
 import pytest
-from fastapi.testclient import TestClient
-from app.main import app
-from app.schemas import EmployeeData, PredictRequest
+import sys
 import os
+from pathlib import Path
+
+# Ajouter le répertoire app/ au PYTHONPATH pour les imports absolus
+root_dir = Path(__file__).parent.parent
+app_dir = root_dir / "app"
+sys.path.insert(0, str(app_dir))
+
+# Changer le répertoire de travail vers app/ pour que les chemins relatifs fonctionnent
+os.chdir(app_dir)
+
+from fastapi.testclient import TestClient
+from main import app
+from schemas import EmployeeData, PredictRequest
 
 client = TestClient(app)
 

@@ -7,6 +7,7 @@
 ```bash
 # Installer les dépendances de test
 pip install -r app/requirements.txt
+pip install pytest pytest-cov
 ```
 
 ### Exécution basique
@@ -14,7 +15,14 @@ pip install -r app/requirements.txt
 ```bash
 # Depuis la racine du projet
 pytest tests/ -v
+
+# Ou simplement (pytest.ini configure automatiquement)
+pytest
 ```
+
+**Note** : 
+- Le fichier `pytest.ini` configure automatiquement le PYTHONPATH
+- Le script `test_api.py` configure aussi le PYTHONPATH pour les imports absolus de `app/`
 
 ### Exécution avec couverture de code
 
