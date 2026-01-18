@@ -226,4 +226,4 @@ def get_database() -> Database:
         # RuntimeError explicite si la config est absente (plutôt que fallback hasardeux).
         raise RuntimeError("DATABASE_URL non défini")
     return Database(database_url)
-``
+
