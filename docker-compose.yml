@@ -10,6 +10,13 @@ services:
       - db
     environment:
       DATABASE_URL: postgresql://postgres:password@db:5432/mydatabase
+    volumes:
+      - ./data:/app/data
+      - ./app/data:/app/app/data
+      - ./p4:/app/p4
+      - ./models:/app/models
+    networks:
+      - default
 
   db:
    image: postgres:15

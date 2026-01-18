@@ -1,0 +1,21 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches: [ "dev", "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deploy
+        env:
+          HOOK_DEV: ${{ secrets.RENDER_HOOK_DEV }}
+          HOOK_PROD: ${{ secrets.RENDER_HOOK_PROD }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ "$BRANCH" = "main" ]; then
+            curl -X POST "$HOOK_PROD"
+          else
+            curl -X POST "$HOOK_DEV"
+          fi
