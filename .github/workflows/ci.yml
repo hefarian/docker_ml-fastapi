@@ -1,0 +1,93 @@
+name: CI - Tests et Validation
+
+on:
+  push:
+    branches: [ "dev", "main" ]
+  pull_request:
+    branches: [ "dev", "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: mydatabase
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Initialize database
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/mydatabase
+        run: |
+          # Attendre que PostgreSQL soit prêt
+          sleep 5
+          # Charger le script SQL (si disponible)
+          if [ -f "db/init/attrition.sql" ]; then
+            PGPASSWORD=password psql -h localhost -U postgres -d mydatabase -f db/init/attrition.sql || true
+          fi
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/mydatabase
+        run: |
+          pytest tests/ -v --cov=app --cov-report=xml --cov-report=term
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install linting tools
+        run: |
+          pip install flake8 black isort
+
+      - name: Run flake8
+        run: |
+          flake8 app/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 app/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Check code formatting with black
+        run: |
+          black --check app/ tests/
+
+      - name: Check import sorting with isort
+        run: |
+          isort --check-only app/ tests/

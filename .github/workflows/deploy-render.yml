@@ -3,11 +3,21 @@ name: Deploy to Render
 on:
   push:
     branches: [ "dev", "main" ]
+  workflow_run:
+    workflows: ["CI - Tests et Validation"]
+    types:
+      - completed
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Ne déployer que si les tests passent
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'push'
+    
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Trigger Render Deploy
         env:
           HOOK_DEV: ${{ secrets.RENDER_HOOK_DEV }}
@@ -15,7 +25,27 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: |
           if [ "$BRANCH" = "main" ]; then
+            echo "🚀 Déploiement en production..."
             curl -X POST "$HOOK_PROD"
           else
+            echo "🚀 Déploiement en développement..."
             curl -X POST "$HOOK_DEV"
+          fi
+
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Attente du déploiement..."
+          sleep 30
+
+      - name: Health check
+        run: |
+          if [ "$BRANCH" = "main" ]; then
+            URL="${{ secrets.RENDER_URL_PROD }}"
+          else
+            URL="${{ secrets.RENDER_URL_DEV }}"
+          fi
+          
+          if [ -n "$URL" ]; then
+            echo "🔍 Vérification de la santé de l'API..."
+            curl -f "$URL/health" || echo "⚠️ Health check failed"
           fi

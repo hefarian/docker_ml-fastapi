@@ -1,11 +1,29 @@
-name: Train model
+name: Train Model
 
 on:
-  workflow_dispatch:   # lancement manuel
+  workflow_dispatch:   # Lancement manuel
+  schedule:
+    # Exécution automatique tous les dimanches à 2h du matin (UTC)
+    - cron: '0 2 * * 0'
 
 jobs:
   train:
     runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: mydatabase
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -18,8 +36,41 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install --upgrade pip
+          pip install -r app/requirements.txt
+
+      - name: Initialize database
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/mydatabase
+        run: |
+          # Attendre que PostgreSQL soit prêt
+          sleep 10
+          # Charger le script SQL
+          if [ -f "db/init/attrition.sql" ]; then
+            PGPASSWORD=password psql -h localhost -U postgres -d mydatabase -f db/init/attrition.sql
+          fi
 
       - name: Run training
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/mydatabase
+          OPTUNA_TRIALS: 30  # Réduire pour CI
+          OPTUNA_TIMEOUT: 600  # 10 minutes max
         run: |
-          python train_model.py
+          python app/train_model.py
+
+      - name: Upload model artifacts
+        uses: actions/upload-artifact@v3
+        if: success()
+        with:
+          name: trained-model
+          path: models/
+          retention-days: 30
+
+      - name: Commit and push model (optional)
+        if: github.ref == 'refs/heads/main' && success()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add models/
+          git diff --staged --quiet || git commit -m "Auto-update: Retrain model [skip ci]"
+          git push || echo "No changes to commit"
