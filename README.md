@@ -189,4 +189,4 @@ Ce projet est un projet de formation OpenClassrooms.
 
 ## 👤 Auteur
 
-Gregory Crespin - Projet 4 - Déploiement d'un modèle ML
+Hefarian
