@@ -1,36 +1,148 @@
+# ============================================================================
+# FICHIER : docker-compose.yml
+# ============================================================================
+# 
+# QU'EST-CE QUE DOCKER COMPOSE ?
+# ===============================
+# Docker Compose est un outil qui permet de définir et gérer plusieurs conteneurs
+# Docker en même temps. Au lieu de lancer chaque conteneur séparément avec des
+# commandes complexes, on définit tout dans ce fichier YAML.
+#
+# POURQUOI UTILISER DOCKER COMPOSE ICI ?
+# =======================================
+# Ce projet a besoin de 2 services qui doivent communiquer :
+# 1. Une API FastAPI (application Python)
+# 2. Une base de données PostgreSQL
+#
+# Docker Compose permet de :
+# - Définir les deux services en une seule fois
+# - Configurer le réseau pour qu'ils puissent communiquer
+# - Gérer les volumes (partage de fichiers entre l'hôte et les conteneurs)
+# - Définir les variables d'environnement
+#
+# COMMENT UTILISER CE FICHIER ?
+# ==============================
+# - docker-compose up : démarre tous les services
+# - docker-compose down : arrête tous les services
+# - docker-compose build : reconstruit les images
+# - docker-compose logs : affiche les logs
+#
+# ============================================================================
+
+# Version du format docker-compose (obsolète mais conservé pour compatibilité)
+# Note : Docker Compose moderne ignore cette ligne, mais on la garde pour éviter
+# des warnings dans certaines versions
 version: "4.56"
 
+# ============================================================================
+# SECTION : services
+# ============================================================================
+# Définit tous les conteneurs/services à lancer
 services:
+  
+  # --------------------------------------------------------------------------
+  # SERVICE : api (Application FastAPI)
+  # --------------------------------------------------------------------------
   api:
+    # build : indique à Docker de construire l'image depuis le Dockerfile
+    # "." signifie "utiliser le Dockerfile dans le répertoire courant"
     build: .
+    
+    # container_name : nom du conteneur (plus facile à identifier dans docker ps)
     container_name: fastapi_app
+    
+    # ports : mappe les ports entre l'hôte et le conteneur
+    # Format : "port_hôte:port_conteneur"
+    # Ici : le port 8090 de votre machine pointe vers le port 8090 du conteneur
+    # Donc http://localhost:8090 sur votre PC accède à l'API dans le conteneur
     ports:
       - "8090:8090"
+    
+    # depends_on : indique que ce service dépend du service "db"
+    # Docker Compose attendra que "db" soit démarré avant de démarrer "api"
     depends_on:
       - db
+    
+    # environment : variables d'environnement passées au conteneur
+    # Ces variables sont accessibles dans le code Python via os.getenv("DATABASE_URL")
     environment:
+      # URL de connexion à PostgreSQL
+      # Format : postgresql://utilisateur:mot_de_passe@hôte:port/nom_base
+      # "db" est le nom du service PostgreSQL (Docker résout automatiquement le nom)
       DATABASE_URL: postgresql://postgres:password@db:5432/mydatabase
+    
+    # volumes : partage de fichiers/dossiers entre votre PC et le conteneur
+    # Format : "chemin_hôte:chemin_conteneur"
+    # Cela permet de :
+    # - Accéder aux fichiers CSV depuis le conteneur
+    # - Sauvegarder les modèles entraînés sur votre PC
+    # - Modifier le code sans reconstruire l'image
     volumes:
+      # Dossier data/ sur votre PC -> /app/data dans le conteneur
       - ./data:/app/data
+      # Dossier app/data/ sur votre PC -> /app/app/data dans le conteneur
       - ./app/data:/app/app/data
+      # Dossier p4/ (notebooks) -> /app/p4 dans le conteneur
       - ./p4:/app/p4
+      # Dossier models/ (modèles entraînés) -> /app/models dans le conteneur
       - ./models:/app/models
+    
+    # networks : réseau Docker auquel ce service appartient
+    # "default" : réseau par défaut créé automatiquement par Docker Compose
+    # Tous les services sur le même réseau peuvent communiquer entre eux
     networks:
       - default
 
+  # --------------------------------------------------------------------------
+  # SERVICE : db (Base de données PostgreSQL)
+  # --------------------------------------------------------------------------
   db:
-   image: postgres:15
-   container_name: postgres_db
-   restart: always
-   environment:
-     POSTGRES_USER: postgres
-     POSTGRES_PASSWORD: password
-     POSTGRES_DB: mydatabase
-   ports:
-     - "5432:5432"
-   volumes:
-     - postgres_data:/var/lib/postgresql/data
-     - ./db/init:/docker-entrypoint-initdb.d
+    # image : utilise une image Docker pré-construite (pas besoin de Dockerfile)
+    # "postgres:15" : image officielle PostgreSQL version 15
+    # Docker téléchargera automatiquement cette image si elle n'est pas présente
+    image: postgres:15
+    
+    # container_name : nom du conteneur PostgreSQL
+    container_name: postgres_db
+    
+    # restart : politique de redémarrage automatique
+    # "always" : redémarre automatiquement si le conteneur s'arrête
+    # Utile en production pour garantir la disponibilité
+    restart: always
+    
+    # environment : variables d'environnement pour PostgreSQL
+    environment:
+      # Utilisateur PostgreSQL (par défaut "postgres")
+      POSTGRES_USER: postgres
+      # Mot de passe PostgreSQL (⚠️ À changer en production !)
+      POSTGRES_PASSWORD: password
+      # Nom de la base de données créée automatiquement au démarrage
+      POSTGRES_DB: mydatabase
+    
+    # ports : expose le port PostgreSQL sur votre machine
+    # "5432:5432" : port 5432 de votre PC -> port 5432 du conteneur
+    # Permet de se connecter à PostgreSQL depuis votre PC (ex: avec pgAdmin, DBeaver)
+    ports:
+      - "5432:5432"
+    
+    # volumes : stockage persistant des données PostgreSQL
+    volumes:
+      # Volume nommé "postgres_data" : les données PostgreSQL sont stockées ici
+      # Ce volume persiste même si le conteneur est supprimé
+      # Défini dans la section "volumes" en bas du fichier
+      - postgres_data:/var/lib/postgresql/data
+      
+      # Montage du dossier db/init/ : scripts SQL exécutés au démarrage
+      # Tous les fichiers .sql dans db/init/ sont exécutés automatiquement
+      # Utile pour créer les tables et insérer les données initiales
+      - ./db/init:/docker-entrypoint-initdb.d
 
+# ============================================================================
+# SECTION : volumes
+# ============================================================================
+# Définit les volumes nommés (stockage persistant)
 volumes:
+  # Volume "postgres_data" : stocke toutes les données PostgreSQL
+  # Même si vous supprimez le conteneur, les données restent
+  # Pour tout supprimer : docker-compose down -v
   postgres_data:

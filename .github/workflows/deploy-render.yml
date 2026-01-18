@@ -1,51 +1,127 @@
+# ============================================================================
+# FICHIER : .github/workflows/deploy-render.yml
+# ============================================================================
+#
+# QU'EST-CE QUE CE WORKFLOW ?
+# ===========================
+# Ce workflow déploie automatiquement l'API sur Render.com après les tests.
+# Render.com est une plateforme d'hébergement cloud (comme Heroku).
+#
+# QU'EST-CE QUE LE DÉPLOIEMENT CONTINU (CD) ?
+# ============================================
+# CD = Continuous Deployment (Déploiement Continu)
+# Après chaque modification validée, l'application est automatiquement
+# déployée en production (ou en environnement de test).
+#
+# COMMENT ÇA MARCHE AVEC RENDER ?
+# ================================
+# Render.com fournit un "webhook" (URL spéciale).
+# Quand on envoie une requête POST à cette URL, Render redéploie l'application.
+# Ce workflow envoie cette requête automatiquement.
+#
+# ENVIRONNEMENTS :
+# =================
+# - Branche "dev" → Environnement de développement (test)
+# - Branche "main" → Environnement de production
+#
+# ============================================================================
+
+# Nom du workflow
 name: Deploy to Render
 
+# ============================================================================
+# SECTION : on (déclencheurs)
+# ============================================================================
 on:
+  # push : déclenchement à chaque push
   push:
+    # branches : seulement sur "dev" et "main"
     branches: [ "dev", "main" ]
+  
+  # workflow_run : déclenchement après qu'un autre workflow se termine
   workflow_run:
+    # workflows : nom du workflow à attendre
     workflows: ["CI - Tests et Validation"]
+    # types : type d'événement (completed = terminé)
     types:
       - completed
 
+# ============================================================================
+# SECTION : jobs
+# ============================================================================
 jobs:
+  # Job de déploiement
   deploy:
+    # Machine virtuelle Ubuntu
     runs-on: ubuntu-latest
-    # Ne déployer que si les tests passent
+    
+    # Condition : ne déployer que si les tests passent
+    # github.event.workflow_run.conclusion == 'success' : le workflow CI a réussi
+    # || github.event_name == 'push' : OU si c'est un push direct (pas de workflow_run)
     if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'push'
     
+    # Étapes de déploiement
     steps:
+      # ÉTAPE 1 : Récupérer le code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ÉTAPE 2 : Déclencher le déploiement Render
       - name: Trigger Render Deploy
         env:
+          # HOOK_DEV : URL du webhook Render pour l'environnement de développement
+          # ${{ secrets.RENDER_HOOK_DEV }} : variable secrète GitHub
+          # Les secrets sont configurés dans Settings > Secrets du dépôt GitHub
           HOOK_DEV: ${{ secrets.RENDER_HOOK_DEV }}
+          
+          # HOOK_PROD : URL du webhook Render pour la production
           HOOK_PROD: ${{ secrets.RENDER_HOOK_PROD }}
+          
+          # BRANCH : nom de la branche actuelle
+          # github.ref_name : nom de la branche (ex: "main", "dev")
           BRANCH: ${{ github.ref_name }}
         run: |
+          # Vérifier sur quelle branche on est
           if [ "$BRANCH" = "main" ]; then
+            # Branche main = production
             echo "🚀 Déploiement en production..."
+            # Envoyer une requête POST au webhook de production
+            # curl : outil en ligne de commande pour faire des requêtes HTTP
+            # -X POST : méthode HTTP POST
             curl -X POST "$HOOK_PROD"
           else
+            # Branche dev = développement
             echo "🚀 Déploiement en développement..."
+            # Envoyer une requête POST au webhook de développement
             curl -X POST "$HOOK_DEV"
           fi
 
+      # ÉTAPE 3 : Attendre que le déploiement se termine
       - name: Wait for deployment
         run: |
           echo "⏳ Attente du déploiement..."
+          # Attendre 30 secondes pour laisser le temps à Render de déployer
+          # En production, on pourrait utiliser une boucle qui vérifie le statut
           sleep 30
 
+      # ÉTAPE 4 : Vérifier que l'API fonctionne (health check)
       - name: Health check
         run: |
+          # Déterminer l'URL selon la branche
           if [ "$BRANCH" = "main" ]; then
+            # URL de production (variable secrète GitHub)
             URL="${{ secrets.RENDER_URL_PROD }}"
           else
+            # URL de développement
             URL="${{ secrets.RENDER_URL_DEV }}"
           fi
           
+          # Vérifier que l'URL est définie
+          # -n : vérifie que la variable n'est pas vide
           if [ -n "$URL" ]; then
             echo "🔍 Vérification de la santé de l'API..."
+            # curl -f : échoue si le code HTTP n'est pas 2xx
+            # || echo : si curl échoue, affiche un message d'avertissement
+            # Cela n'arrête pas le workflow (pas d'erreur fatale)
             curl -f "$URL/health" || echo "⚠️ Health check failed"
           fi

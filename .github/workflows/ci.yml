@@ -1,93 +1,223 @@
+# ============================================================================
+# FICHIER : .github/workflows/ci.yml
+# ============================================================================
+#
+# QU'EST-CE QU'UN WORKFLOW GITHUB ACTIONS ?
+# =========================================
+# Un workflow est un fichier YAML qui définit des tâches automatisées.
+# GitHub Actions exécute ces tâches à chaque événement (push, pull request, etc.)
+#
+# QU'EST-CE QUE CI (CONTINUOUS INTEGRATION) ?
+# ============================================
+# CI = Intégration Continue
+# À chaque modification du code, on exécute automatiquement :
+# - Les tests unitaires
+# - Les vérifications de qualité de code (linting)
+# - Les vérifications de formatage
+#
+# POURQUOI C'EST IMPORTANT ?
+# ===========================
+# 1. Détecte les bugs avant qu'ils n'atteignent la production
+# 2. Garantit que le code respecte les standards
+# 3. Évite de fusionner du code cassé dans la branche principale
+#
+# COMMENT ÇA MARCHE ?
+# ===================
+# 1. Vous poussez du code sur GitHub (push)
+# 2. GitHub Actions détecte l'événement
+# 3. GitHub lance un serveur virtuel (runner)
+# 4. Le runner exécute les étapes définies dans ce fichier
+# 5. Vous recevez un rapport (succès ou échec)
+#
+# ============================================================================
+
+# Nom du workflow (visible dans l'interface GitHub Actions)
 name: CI - Tests et Validation
 
+# ============================================================================
+# SECTION : on (déclencheurs)
+# ============================================================================
+# Définit QUAND le workflow doit s'exécuter
 on:
+  # push : s'exécute à chaque push de code
   push:
+    # branches : seulement sur les branches "dev" et "main"
+    # Si vous poussez sur une autre branche, le workflow ne s'exécute pas
     branches: [ "dev", "main" ]
+  
+  # pull_request : s'exécute à chaque pull request (demande de fusion)
   pull_request:
+    # branches : seulement pour les PR vers "dev" et "main"
     branches: [ "dev", "main" ]
 
+# ============================================================================
+# SECTION : jobs (tâches)
+# ============================================================================
+# Un job est une série d'étapes qui s'exécutent sur le même runner
+# Ici, on a 2 jobs : "test" et "lint"
 jobs:
+  
+  # --------------------------------------------------------------------------
+  # JOB 1 : test (exécution des tests)
+  # --------------------------------------------------------------------------
   test:
+    # runs-on : type de machine virtuelle à utiliser
+    # ubuntu-latest : dernière version d'Ubuntu Linux
     runs-on: ubuntu-latest
     
+    # services : services externes nécessaires pour les tests
+    # Ici, on a besoin de PostgreSQL pour tester la connexion à la base
     services:
+      # Service PostgreSQL
       postgres:
+        # image : image Docker PostgreSQL version 15
         image: postgres:15
+        
+        # env : variables d'environnement pour PostgreSQL
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: mydatabase
+          POSTGRES_USER: postgres        # Utilisateur PostgreSQL
+          POSTGRES_PASSWORD: password    # Mot de passe (⚠️ À changer en production !)
+          POSTGRES_DB: mydatabase        # Nom de la base de données
+        
+        # ports : expose le port PostgreSQL
         ports:
           - 5432:5432
+        
+        # options : options de santé pour le conteneur
+        # GitHub vérifie que PostgreSQL est prêt avant de continuer
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd pg_isready        # Commande pour vérifier la santé
+          --health-interval 10s          # Vérifie toutes les 10 secondes
+          --health-timeout 5s             # Timeout de 5 secondes
+          --health-retries 5              # Réessaie 5 fois avant d'abandonner
 
+    # steps : étapes à exécuter dans l'ordre
     steps:
+      # ÉTAPE 1 : Récupérer le code depuis GitHub
       - name: Checkout code
+        # uses : utilise une action pré-construite
+        # actions/checkout@v4 : télécharge le code du dépôt GitHub
         uses: actions/checkout@v4
 
+      # ÉTAPE 2 : Installer Python
       - name: Setup Python
+        # actions/setup-python@v5 : installe Python sur le runner
         uses: actions/setup-python@v5
         with:
+          # python-version : version de Python à installer
           python-version: "3.11"
 
+      # ÉTAPE 3 : Installer les dépendances Python
       - name: Install dependencies
+        # run : exécute des commandes shell
         run: |
+          # Mettre à jour pip (gestionnaire de packages Python)
           pip install --upgrade pip
+          # Installer les dépendances du projet
           pip install -r app/requirements.txt
+          # Installer pytest et pytest-cov (pour les tests et la couverture)
           pip install pytest pytest-cov
 
+      # ÉTAPE 4 : Initialiser la base de données
       - name: Initialize database
+        # env : variables d'environnement pour cette étape
         env:
+          # URL de connexion à PostgreSQL
           DATABASE_URL: postgresql://postgres:password@localhost:5432/mydatabase
         run: |
-          # Attendre que PostgreSQL soit prêt
+          # Attendre que PostgreSQL soit prêt (5 secondes)
           sleep 5
-          # Charger le script SQL (si disponible)
+          # Charger le script SQL si il existe
+          # -f : vérifie si le fichier existe
           if [ -f "db/init/attrition.sql" ]; then
+            # PGPASSWORD : variable d'environnement pour le mot de passe
+            # psql : client PostgreSQL en ligne de commande
+            # -h localhost : hôte PostgreSQL
+            # -U postgres : utilisateur
+            # -d mydatabase : base de données
+            # -f : exécute le fichier SQL
+            # || true : continue même si la commande échoue (pour éviter d'arrêter le workflow)
             PGPASSWORD=password psql -h localhost -U postgres -d mydatabase -f db/init/attrition.sql || true
           fi
 
+      # ÉTAPE 5 : Exécuter les tests
       - name: Run tests
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/mydatabase
         run: |
+          # pytest : exécute les tests
+          # tests/ : dossier contenant les tests
+          # -v : mode verbose (affiche plus de détails)
+          # --cov=app : mesure la couverture de code pour le module "app"
+          # --cov-report=xml : génère un rapport XML (pour Codecov)
+          # --cov-report=term : affiche le rapport dans le terminal
           pytest tests/ -v --cov=app --cov-report=xml --cov-report=term
 
+      # ÉTAPE 6 : Uploader le rapport de couverture vers Codecov
       - name: Upload coverage to Codecov
+        # codecov/codecov-action@v3 : action pour uploader vers Codecov
         uses: codecov/codecov-action@v3
         with:
+          # file : fichier de rapport de couverture
           file: ./coverage.xml
+          # flags : étiquettes pour identifier le type de tests
           flags: unittests
+          # name : nom du rapport
           name: codecov-umbrella
 
+  # --------------------------------------------------------------------------
+  # JOB 2 : lint (vérification de la qualité du code)
+  # --------------------------------------------------------------------------
   lint:
+    # runs-on : même type de machine que le job test
     runs-on: ubuntu-latest
+    
+    # steps : étapes pour vérifier la qualité du code
     steps:
+      # ÉTAPE 1 : Récupérer le code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ÉTAPE 2 : Installer Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # ÉTAPE 3 : Installer les outils de linting
       - name: Install linting tools
         run: |
+          # flake8 : vérifie le style et les erreurs Python
+          # black : formateur de code Python (vérifie le formatage)
+          # isort : trie les imports Python
           pip install flake8 black isort
 
+      # ÉTAPE 4 : Exécuter flake8
       - name: Run flake8
         run: |
+          # Première commande : vérifie les erreurs critiques (E9, F63, F7, F82)
+          # --count : compte les erreurs
+          # --select : sélectionne seulement certaines erreurs
+          # --show-source : affiche le code source de l'erreur
+          # --statistics : affiche des statistiques
           flake8 app/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          
+          # Deuxième commande : vérifie toutes les autres erreurs
+          # --exit-zero : ne fait pas échouer le workflow même s'il y a des erreurs
+          # --max-complexity=10 : limite la complexité cyclomatique à 10
+          # --max-line-length=127 : limite la longueur des lignes à 127 caractères
           flake8 app/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
+      # ÉTAPE 5 : Vérifier le formatage avec black
       - name: Check code formatting with black
         run: |
+          # --check : vérifie le formatage sans le modifier
+          # Si le code n'est pas bien formaté, la commande échoue
           black --check app/ tests/
 
+      # ÉTAPE 6 : Vérifier le tri des imports avec isort
       - name: Check import sorting with isort
         run: |
+          # --check-only : vérifie le tri sans le modifier
+          # Si les imports ne sont pas triés, la commande échoue
           isort --check-only app/ tests/
