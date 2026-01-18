@@ -2,6 +2,8 @@
 
 API FastAPI pour prédire l'attrition des employés à l'aide d'un modèle XGBoost optimisé.
 
+<strong><span style="color:red">NB : Toute la documentation et les commentaires dans le code ont été corrigé et remis en forme par IA générative en "mode tutoriel" pour une meilleur compréhension.</span></strong>
+
 ## 📋 Table des matières
 
 - [Description](#description)
