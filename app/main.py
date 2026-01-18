@@ -33,7 +33,7 @@
 # ============================================================================
 # IMPORTS
 # ============================================================================
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from schemas import PredictRequest, PredictResponse, HealthResponse
 from model import get_model
 from database import get_database
@@ -509,4 +509,123 @@ def model_info():
         raise HTTPException(
             status_code=500,
             detail=f"Erreur lors de la récupération des informations modèle: {str(e)}"
+        )
+
+
+# ============================================================================
+# ENDPOINT : /admin/train-model (Déclenchement de l'entraînement)
+# ============================================================================
+@app.post("/admin/train-model")
+async def trigger_training(authorization: str = Header(None)):
+    """
+    Endpoint pour déclencher l'entraînement du modèle sur Render.
+    
+    QU'EST-CE QUE CET ENDPOINT ?
+    ============================
+    Cet endpoint permet de lancer le script train_model.py directement depuis Render.
+    Utile pour réentraîner le modèle sans avoir à se connecter au Shell Render.
+    
+    AUTHENTIFICATION :
+    ==================
+    Envoyez le token dans le header Authorization :
+    Authorization: Bearer votre-token-secret
+    
+    Le token doit être défini dans les variables d'environnement Render :
+    ADMIN_TOKEN=votre-token-secret
+    
+    COMMENT ÇA MARCHE ?
+    ===================
+    1. Vérifie l'authentification (token)
+    2. Lance train_model.py en arrière-plan
+    3. Retourne immédiatement (ne bloque pas l'API)
+    4. L'entraînement s'exécute en arrière-plan
+    
+    NOTE IMPORTANTE :
+    =================
+    - L'entraînement peut prendre plusieurs minutes (10-30 min selon OPTUNA_TRIALS)
+    - Vérifiez les logs Render pour suivre la progression
+    - Le modèle sera sauvegardé dans models/ une fois terminé
+    - En production, utilisez une queue (Celery, RQ) pour éviter les timeouts
+    
+    EXEMPLE D'UTILISATION :
+    =======================
+    curl -X POST https://votre-api.render.com/admin/train-model \
+      -H "Authorization: Bearer votre-token-secret"
+    """
+    import subprocess
+    import os
+    
+    # ========================================================================
+    # VÉRIFICATION DE L'AUTHENTIFICATION
+    # ========================================================================
+    # Récupérer le token depuis les variables d'environnement
+    ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
+    
+    # Si ADMIN_TOKEN est défini, vérifier l'authentification
+    if ADMIN_TOKEN:
+        # Vérifier que le header Authorization est présent
+        if not authorization:
+            raise HTTPException(
+                status_code=401,
+                detail="Token d'authentification manquant. Envoyez-le dans le header Authorization: Bearer <token>"
+            )
+        
+        # Vérifier que le token correspond
+        expected_auth = f"Bearer {ADMIN_TOKEN}"
+        if authorization != expected_auth:
+            raise HTTPException(
+                status_code=401,
+                detail="Token d'authentification invalide"
+            )
+    
+    # ========================================================================
+    # VÉRIFICATION DES PRÉREQUIS
+    # ========================================================================
+    # Vérifier que DATABASE_URL est définie
+    if not os.getenv("DATABASE_URL"):
+        raise HTTPException(
+            status_code=500,
+            detail="DATABASE_URL non définie. Configurez-la dans les variables d'environnement Render."
+        )
+    
+    # Vérifier que train_model.py existe
+    train_script = Path("train_model.py")
+    if not train_script.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Fichier train_model.py introuvable dans {Path.cwd()}"
+        )
+    
+    # ========================================================================
+    # LANCEMENT DE L'ENTRAÎNEMENT
+    # ========================================================================
+    try:
+        # Créer le dossier models/ s'il n'existe pas
+        models_dir = Path("models")
+        models_dir.mkdir(exist_ok=True)
+        
+        # Exécuter le script d'entraînement en arrière-plan
+        # subprocess.Popen : lance un processus sans attendre sa fin
+        # stdout/stderr : rediriger vers des pipes (pour les logs)
+        process = subprocess.Popen(
+            ["python", "train_model.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd="/app"  # Répertoire de travail (Render utilise /app)
+        )
+        
+        return {
+            "status": "started",
+            "message": "Entraînement démarré avec succès",
+            "pid": process.pid,
+            "note": "L'entraînement s'exécute en arrière-plan. Vérifiez les logs Render pour suivre la progression.",
+            "estimated_time": "10-30 minutes selon OPTUNA_TRIALS",
+            "logs": "Consultez les logs Render pour voir la progression en temps réel"
+        }
+    except Exception as e:
+        # En cas d'erreur lors du lancement
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur lors du démarrage de l'entraînement: {str(e)}"
         )

@@ -184,6 +184,7 @@ Dans les paramètres du dépôt, ajouter :
 
 - [GUIDE_TESTS.md](GUIDE_TESTS.md) - Guide d'utilisation des tests
 - [GUIDE_TRAIN_DEPLOY.md](GUIDE_TRAIN_DEPLOY.md) - Guide d'entraînement et déploiement
+- [GUIDE_RENDER_TRAIN.md](GUIDE_RENDER_TRAIN.md) - Guide pour exécuter train_model.py sur Render.com
 
 ## 📄 Licence
 
