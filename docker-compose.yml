@@ -82,8 +82,6 @@ services:
       - ./data:/app/data
       # Dossier app/data/ sur votre PC -> /app/app/data dans le conteneur
       - ./app/data:/app/app/data
-      # Dossier p4/ (notebooks) -> /app/p4 dans le conteneur
-      - ./p4:/app/p4
       # Dossier models/ (modèles entraînés) -> /app/models dans le conteneur
       - ./models:/app/models
     
