@@ -110,7 +110,8 @@ COPY app .
 # -p : crée aussi les dossiers parents si nécessaire
 # Ce dossier sera utilisé pour stocker les modèles entraînés
 RUN mkdir -p models
-
+# Copy des fichier models de Github
+COPY models /app/models
 # ----------------------------------------------------------------------------
 # ÉTAPE 8 : Configurer le PYTHONPATH
 # ----------------------------------------------------------------------------
