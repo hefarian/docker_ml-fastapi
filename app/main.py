@@ -629,3 +629,13 @@ async def trigger_training(authorization: str = Header(None)):
             status_code=500,
             detail=f"Erreur lors du démarrage de l'entraînement: {str(e)}"
         )
+@app.get("/debug/tables")
+def debug_tables():
+    import psycopg2
+    import os
+    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+    cur = conn.cursor()
+    cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
+    rows = cur.fetchall()
+    return rows
+
