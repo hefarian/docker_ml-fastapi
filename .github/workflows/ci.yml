@@ -217,11 +217,13 @@ jobs:
         run: |
           # --check : vérifie le formatage sans le modifier
           # Si le code n'est pas bien formaté, la commande échoue
-          black --check app/ tests/
+          # --line-length 127 : correspond à la configuration flake8
+          black --check --line-length 127 app/ tests/ || (echo "⚠️ Certains fichiers ne sont pas formatés selon Black. Exécutez 'black app/ tests/ --line-length 127' localement." && exit 1)
 
       # ÉTAPE 6 : Vérifier le tri des imports avec isort
       - name: Check import sorting with isort
         run: |
           # --check-only : vérifie le tri sans le modifier
           # Si les imports ne sont pas triés, la commande échoue
-          isort --check-only app/ tests/
+          # --line-length 127 : correspond à la configuration flake8
+          isort --check-only --line-length 127 app/ tests/ || (echo "⚠️ Certains imports ne sont pas triés selon isort. Exécutez 'isort app/ tests/ --line-length 127' localement." && exit 1)
