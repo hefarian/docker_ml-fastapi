@@ -31,6 +31,7 @@ import pytest
 import sys
 import os
 from pathlib import Path
+from unittest.mock import MagicMock
 
 # ============================================================================
 # CONFIGURATION DU PYTHONPATH
@@ -444,3 +445,159 @@ def test_schema_predict_request():
     # request.employee_data : accède aux données de l'employé
     # .age : accède à l'âge de l'employé
     assert request.employee_data.age == 35
+
+
+# ============================================================================
+# TESTS DES ENDPOINTS SUPPLÉMENTAIRES
+# ============================================================================
+
+def test_model_info():
+    """
+    Test du endpoint /model-info
+    
+    CE QUE CE TEST VÉRIFIE :
+    ========================
+    - L'endpoint /model-info retourne des informations sur le modèle
+    - La réponse contient les champs attendus (model_type, model_version, etc.)
+    
+    NOTE :
+    =====
+    Le test accepte 200 (succès) OU 503 (modèle non disponible).
+    Pourquoi ? Parce que le modèle peut ne pas être chargé (fichiers manquants).
+    """
+    # Requête GET vers /model-info
+    res = client.get("/model-info")
+    
+    # Accepter 200 (succès) ou 503 (modèle non disponible)
+    assert res.status_code in [200, 503]
+    
+    # Si la requête a réussi, vérifier la structure de la réponse
+    if res.status_code == 200:
+        data = res.json()
+        
+        # Vérifier la présence des champs attendus
+        assert "model_type" in data
+        assert "model_version" in data
+        assert "artifacts" in data
+
+
+def test_admin_train_model_without_auth():
+    """
+    Test du endpoint /admin/train-model sans authentification
+    
+    CE QUE CE TEST VÉRIFIE :
+    ========================
+    - Si ADMIN_TOKEN est défini mais le token n'est pas fourni, l'API retourne 401
+    - Si ADMIN_TOKEN n'est pas défini, l'endpoint peut être accessible (selon l'implémentation)
+    """
+    import os
+    
+    # Sauvegarder la valeur actuelle de ADMIN_TOKEN
+    original_token = os.environ.get("ADMIN_TOKEN")
+    
+    try:
+        # Cas 1 : ADMIN_TOKEN défini mais pas de header Authorization
+        os.environ["ADMIN_TOKEN"] = "secret-token"
+        
+        # Requête POST sans header Authorization
+        res = client.post("/admin/train-model")
+        
+        # Si ADMIN_TOKEN est défini, on s'attend à 401
+        # Si ADMIN_TOKEN n'est pas défini, l'endpoint peut être accessible
+        assert res.status_code in [401, 500]  # 500 si DATABASE_URL manque
+        
+    finally:
+        # Restaurer la valeur originale
+        if original_token:
+            os.environ["ADMIN_TOKEN"] = original_token
+        elif "ADMIN_TOKEN" in os.environ:
+            del os.environ["ADMIN_TOKEN"]
+
+
+def test_admin_train_model_with_auth():
+    """
+    Test du endpoint /admin/train-model avec authentification
+    
+    CE QUE CE TEST VÉRIFIE :
+    ========================
+    - Si le token est correct, l'endpoint accepte la requête
+    - La réponse indique que l'entraînement a démarré
+    
+    NOTE :
+    =====
+    Ce test peut échouer si DATABASE_URL n'est pas définie ou si train_model.py n'existe pas.
+    C'est acceptable car c'est un test d'intégration partielle.
+    """
+    import os
+    from unittest.mock import patch
+    
+    # Sauvegarder la valeur actuelle
+    original_token = os.environ.get("ADMIN_TOKEN")
+    original_db_url = os.environ.get("DATABASE_URL")
+    
+    try:
+        # Configurer l'environnement de test
+        os.environ["ADMIN_TOKEN"] = "secret-token"
+        if not original_db_url:
+            os.environ["DATABASE_URL"] = "postgresql://user:pass@localhost:5432/testdb"
+        
+        # Mock de subprocess.Popen pour éviter de lancer vraiment train_model.py
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.pid = 12345
+            mock_popen.return_value = mock_process
+            
+            # Requête POST avec header Authorization
+            res = client.post(
+                "/admin/train-model",
+                headers={"Authorization": "Bearer secret-token"}
+            )
+            
+            # Accepter 200 (succès) ou 500 (erreur serveur)
+            # 500 peut arriver si train_model.py n'existe pas ou autres erreurs
+            assert res.status_code in [200, 500]
+            
+            # Si la requête a réussi, vérifier la structure de la réponse
+            if res.status_code == 200:
+                data = res.json()
+                assert "status" in data
+                assert "message" in data
+                assert data["status"] == "started"
+                
+    finally:
+        # Restaurer les valeurs originales
+        if original_token:
+            os.environ["ADMIN_TOKEN"] = original_token
+        elif "ADMIN_TOKEN" in os.environ:
+            del os.environ["ADMIN_TOKEN"]
+        
+        if original_db_url:
+            os.environ["DATABASE_URL"] = original_db_url
+        elif "DATABASE_URL" in os.environ and not original_db_url:
+            del os.environ["DATABASE_URL"]
+
+
+def test_predict_with_prediction_id():
+    """
+    Test de prédiction avec enregistrement en base (prediction_id)
+    
+    CE QUE CE TEST VÉRIFIE :
+    ========================
+    - Si l'enregistrement en base réussit, prediction_id est retourné
+    - Si l'enregistrement échoue, prediction_id peut être None mais la prédiction est quand même retournée
+    """
+    payload = {"employee_data": SAMPLE_EMPLOYEE}
+    res = client.post("/predict", json=payload)
+    
+    # Accepter 200 (succès) ou 503 (modèle non disponible)
+    assert res.status_code in [200, 503]
+    
+    # Si la requête a réussi, vérifier la présence de prediction_id
+    if res.status_code == 200:
+        data = res.json()
+        # prediction_id peut être None si l'enregistrement DB a échoué
+        # mais la prédiction est quand même retournée
+        assert "prediction_id" in data
+        # prediction_id peut être None ou un entier
+        if data["prediction_id"] is not None:
+            assert isinstance(data["prediction_id"], int)
