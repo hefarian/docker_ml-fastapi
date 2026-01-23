@@ -1,4 +1,3 @@
-
 # ============================================================================
 # FICHIER : app/train_model.py
 # ============================================================================
@@ -58,7 +57,7 @@ import os
 import sys
 import warnings
 from pathlib import Path
-from typing import Tuple, Optional, Dict, Any
+from typing import Any, Dict, Optional, Tuple
 
 # joblib : pour sauvegarder/charger les modèles et préprocesseurs
 import joblib
@@ -66,18 +65,24 @@ import joblib
 # numpy : calculs numériques (tableaux multidimensionnels)
 import numpy as np
 
+# optuna : bibliothèque d'optimisation d'hyperparamètres
+# TPE = Tree-structured Parzen Estimator (algorithme de recherche)
+# On évite les callbacks d'intégration pour compatibilité maximale
+import optuna
+
 # pandas : manipulation de données tabulaires (DataFrames)
 import pandas as pd
 
-# sqlalchemy : ORM pour interagir avec PostgreSQL
-from sqlalchemy import create_engine, text
+# xgboost : bibliothèque de machine learning (gradient boosting)
+# On utilise l'API bas niveau xgboost.train (compatible avec les versions plus anciennes)
+import xgboost as xgb
+from optuna.pruners import MedianPruner  # Arrêt prématuré des essais peu prometteurs
+from optuna.samplers import TPESampler  # Algorithme de recherche
 
 # sklearn.metrics : métriques pour évaluer le modèle
-from sklearn.metrics import (
-    classification_report,      # Rapport détaillé (précision, rappel, F1)
-    roc_auc_score,              # AUC-ROC (aire sous la courbe ROC)
-    average_precision_score,    # AUC-PR (aire sous la courbe précision-rappel)
-)
+from sklearn.metrics import average_precision_score  # AUC-PR (aire sous la courbe précision-rappel)
+from sklearn.metrics import classification_report  # Rapport détaillé (précision, rappel, F1)
+from sklearn.metrics import roc_auc_score  # AUC-ROC (aire sous la courbe ROC)
 
 # sklearn.model_selection : outils pour diviser les données
 from sklearn.model_selection import train_test_split
@@ -85,49 +90,41 @@ from sklearn.model_selection import train_test_split
 # sklearn.preprocessing : outils de préparation des données
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder
 
-# xgboost : bibliothèque de machine learning (gradient boosting)
-# On utilise l'API bas niveau xgboost.train (compatible avec les versions plus anciennes)
-import xgboost as xgb
-
-# optuna : bibliothèque d'optimisation d'hyperparamètres
-# TPE = Tree-structured Parzen Estimator (algorithme de recherche)
-# On évite les callbacks d'intégration pour compatibilité maximale
-import optuna
-from optuna.samplers import TPESampler      # Algorithme de recherche
-from optuna.pruners import MedianPruner     # Arrêt prématuré des essais peu prometteurs
-
+# sqlalchemy : ORM pour interagir avec PostgreSQL
+from sqlalchemy import create_engine, text
 
 # ============================================================================
 # FONCTIONS UTILITAIRES
 # ============================================================================
 
+
 def safe_divide(num, den, fill_value: float = 0.0) -> pd.Series:
     """
     Division sûre avec gestion des NaN/infini et division par zéro.
-    
+
     QU'EST-CE QU'UNE DIVISION SÛRE ?
     =================================
     En mathématiques, diviser par zéro est impossible (erreur).
     En programmation, cela crée des valeurs infinies (inf) ou NaN (Not a Number).
     Cette fonction évite ces problèmes.
-    
+
     COMMENT ÇA MARCHE ?
     ===================
     1. Convertit les valeurs en nombres (gère les erreurs)
     2. Vérifie que le dénominateur est > 0 et fini
     3. Divise seulement si c'est sûr
     4. Remplace les NaN/inf par une valeur par défaut (fill_value)
-    
+
     PARAMÈTRES :
     ===========
     - num : numérateur (peut être un nombre, une série pandas, etc.)
     - den : dénominateur (peut être un nombre, une série pandas, etc.)
     - fill_value : valeur à utiliser si division impossible (défaut : 0.0)
-    
+
     RETOUR :
     ========
     pd.Series : série pandas avec les résultats de la division
-    
+
     EXEMPLE :
     =========
     >>> safe_divide([10, 20, 30], [2, 0, 5], fill_value=0.0)
@@ -136,16 +133,16 @@ def safe_divide(num, den, fill_value: float = 0.0) -> pd.Series:
     # Convertir en nombres (errors="coerce" = remplace les erreurs par NaN)
     num = pd.to_numeric(num, errors="coerce")
     den = pd.to_numeric(den, errors="coerce")
-    
+
     # Division conditionnelle :
     # - Si den > 0 ET den est fini (pas inf), alors num / den
     # - Sinon, NaN
     # np.where : équivalent d'un if/else pour chaque élément
     out = np.where((den > 0) & np.isfinite(den), num / den, np.nan)
-    
+
     # Convertir en série pandas (conserve l'index si num est une série)
     out = pd.Series(out, index=num.index if isinstance(num, pd.Series) else None)
-    
+
     # Remplacer les NaN par fill_value (0.0 par défaut)
     return out.fillna(fill_value)
 
@@ -154,10 +151,11 @@ def safe_divide(num, den, fill_value: float = 0.0) -> pd.Series:
 # CHARGEMENT DES DONNÉES DEPUIS POSTGRESQL
 # ============================================================================
 
+
 def load_data_from_db() -> pd.DataFrame:
     """
     Charge les tables sirh, eval (ou performance), sondage et joint sur id_employee.
-    
+
     QU'EST-CE QU'UNE JOINTURE ?
     ===========================
     Une jointure combine plusieurs tables en une seule.
@@ -165,9 +163,9 @@ def load_data_from_db() -> pd.DataFrame:
     - sirh : informations RH (âge, salaire, département, etc.)
     - eval : évaluations de performance
     - sondage : résultats de sondages
-    
+
     Toutes ces tables sont liées par "id_employee" (identifiant unique).
-    
+
     COMMENT ÇA MARCHE ?
     ===================
     1. Se connecter à PostgreSQL avec SQLAlchemy
@@ -175,11 +173,11 @@ def load_data_from_db() -> pd.DataFrame:
     3. Harmoniser les clés (s'assurer que id_employee existe partout)
     4. Faire des jointures gauches (LEFT JOIN) pour combiner les tables
     5. Retourner un DataFrame unique avec toutes les colonnes
-    
+
     RETOUR :
     ========
     pd.DataFrame : DataFrame pandas avec toutes les données combinées
-    
+
     EXEMPLE DE STRUCTURE :
     ======================
     id_employee | age | revenu_mensuel | note_evaluation | a_quitte_l_entreprise
@@ -206,8 +204,8 @@ def load_data_from_db() -> pd.DataFrame:
         # text('SELECT * FROM "sirh";') : requête SQL brute
         # Les guillemets doubles sont nécessaires car "sirh" est en minuscules
         sirh = pd.read_sql(text('SELECT * FROM "sirh";'), conn)
-        
-        # Charger la table eval (évaluations)        
+
+        # Charger la table eval (évaluations)
         eval_df = pd.read_sql(text('SELECT * FROM "eval";'), conn)
         # Charger la table sondage (résultats de sondages)
         sondage = pd.read_sql(text('SELECT * FROM "sondage";'), conn)
@@ -217,7 +215,7 @@ def load_data_from_db() -> pd.DataFrame:
     # ========================================================================
     # Problème : les 3 tables peuvent avoir des formats différents pour id_employee
     # Solution : convertir toutes les clés au même format (entier)
-    
+
     # Table SIRH : id_employee devrait déjà être un entier
     if "id_employee" in sirh.columns:
         # pd.to_numeric : convertit en nombre (errors="coerce" = NaN si erreur)
@@ -230,28 +228,26 @@ def load_data_from_db() -> pd.DataFrame:
         # .astype(str) : convertit en chaîne
         # .str[2:] : prend tout après les 2 premiers caractères ("E_" -> reste "23")
         # pd.to_numeric : convertit "23" en nombre 23
-        eval_df["id_employee"] = pd.to_numeric(
-            eval_df["eval_number"].astype(str).str[2:], errors="coerce"
-        ).astype("Int64")
+        eval_df["id_employee"] = pd.to_numeric(eval_df["eval_number"].astype(str).str[2:], errors="coerce").astype("Int64")
 
     # Table sondage : id_employee peut être dans "code_sondage"
     if "code_sondage" in sondage.columns:
         sondage["id_employee"] = pd.to_numeric(sondage["code_sondage"], errors="coerce").astype("Int64")
 
-   # ========================================================================
+    # ========================================================================
     # JOINTURES GAUCHES (LEFT JOIN)
     # ========================================================================
     # LEFT JOIN : garde toutes les lignes de la table de gauche (sirh)
     # et ajoute les colonnes des autres tables si elles existent
-    
+
     # Première jointure : sirh + eval
     df = sirh.merge(
-        eval_df.drop(columns=["eval_number"], errors="ignore"), # Supprimer eval_number (plus besoin)
-        on="id_employee",       # Clé de jointure
-        how="left",             # LEFT JOIN (garde tous les employés de sirh)
+        eval_df.drop(columns=["eval_number"], errors="ignore"),  # Supprimer eval_number (plus besoin)
+        on="id_employee",  # Clé de jointure
+        how="left",  # LEFT JOIN (garde tous les employés de sirh)
     ).merge(
         # Deuxième jointure : résultat précédent + sondage
-        sondage.drop(columns=["code_sondage"], errors="ignore"),    # Supprimer code_sondage
+        sondage.drop(columns=["code_sondage"], errors="ignore"),  # Supprimer code_sondage
         on="id_employee",
         how="left",
     )
@@ -263,10 +259,11 @@ def load_data_from_db() -> pd.DataFrame:
 # PRÉPARATION DES DONNÉES
 # ============================================================================
 
+
 def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder], Optional[OrdinalEncoder]]:
     """
     Prépare les données pour l'entraînement du modèle.
-    
+
     QU'EST-CE QUE LA PRÉPARATION DES DONNÉES ?
     ===========================================
     Les modèles de machine learning ne peuvent pas travailler directement avec
@@ -275,7 +272,7 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     2. Encoder les variables catégorielles (texte -> nombres)
     3. Créer des features dérivées (nouvelles colonnes calculées)
     4. Supprimer les colonnes inutiles
-    
+
     PIPELINE DE PRÉPARATION :
     =========================
     a) Normalisations/corrections de colonnes
@@ -287,7 +284,7 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     g) Features dérivées (ratios, écarts, etc.)
     h) Suppression de colonnes corrélées
     i) Nettoyage final (NaN, infini)
-    
+
     RETOUR :
     ========
     Tuple contenant :
@@ -301,12 +298,12 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     # ========================================================================
     # a) NORMALISATIONS / CORRECTIONS DE COLONNES
     # ========================================================================
-    
+
     # Problème : le nom de la colonne peut être mal orthographié
     # Solution : chercher les deux variantes possibles
-    col_aug_misspelled = "augementation_salaire_precedente"         # Faute d'orthographe
-    col_aug = "augmentation_salaire_precedente"                     # Correct
-    
+    col_aug_misspelled = "augementation_salaire_precedente"  # Faute d'orthographe
+    col_aug = "augmentation_salaire_precedente"  # Correct
+
     # Chercher quelle colonne existe
     src_col = col_aug_misspelled if col_aug_misspelled in df_.columns else (col_aug if col_aug in df_.columns else None)
 
@@ -314,12 +311,13 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
         # Normaliser le format de l'augmentation salariale
         # Exemple : "11%" ou "11,5%" -> 0.11 ou 0.115
         df_["augmentation_taux"] = (
-            df_[src_col].astype(str)                        # Convertir en chaîne
-            .str.replace("%", "", regex=False)              # Supprimer le %
-            .str.replace(",", ".", regex=False)             # Remplacer , par .
-            .str.replace(r"\s+", "", regex=True)            # Supprimer les espaces
-            .pipe(pd.to_numeric, errors="coerce")           # Convertir en nombre
-            .div(100)                                       # Diviser par 100 (11% -> 0.11)
+            df_[src_col]
+            .astype(str)  # Convertir en chaîne
+            .str.replace("%", "", regex=False)  # Supprimer le %
+            .str.replace(",", ".", regex=False)  # Remplacer , par .
+            .str.replace(r"\s+", "", regex=True)  # Supprimer les espaces
+            .pipe(pd.to_numeric, errors="coerce")  # Convertir en nombre
+            .div(100)  # Diviser par 100 (11% -> 0.11)
         )
         # Supprimer l'ancienne colonne et renommer la nouvelle
         df_.drop(columns=[src_col], inplace=True)
@@ -329,32 +327,33 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     if "nombre_heures_travailless" in df_.columns:
         df_.rename(columns={"nombre_heures_travailless": "nombre_heures_travaillees"}, inplace=True)
 
-     # ========================================================================
+    # ========================================================================
     # b) CRÉATION DE LA VARIABLE CIBLE (ATTRITION)
     # ========================================================================
     # La variable cible = ce qu'on veut prédire
     # Ici : l'employé a-t-il quitté l'entreprise ? (Oui = 1, Non = 0)
-    
+
     if "a_quitte_l_entreprise" in df_.columns:
         df_["Attrition"] = (
-            df_["a_quitte_l_entreprise"].astype(str)        # Convertir en chaîne
-            .str.strip()                                    # Supprimer les espaces
-            .str.lower()                                    # Mettre en minuscules
-            .map({"oui": 1, "non": 0})                      # Mapper oui->1, non->0
-            .fillna(0)                                      # Remplacer NaN par 0
-            .astype(int)                                    # Convertir en entier
+            df_["a_quitte_l_entreprise"]
+            .astype(str)  # Convertir en chaîne
+            .str.strip()  # Supprimer les espaces
+            .str.lower()  # Mettre en minuscules
+            .map({"oui": 1, "non": 0})  # Mapper oui->1, non->0
+            .fillna(0)  # Remplacer NaN par 0
+            .astype(int)  # Convertir en entier
         )
 
     # Supprimer les colonnes inutiles pour le modèle
     df_.drop(
         columns=[
-            "a_quitte_l_entreprise",                        # Déjà converti en Attrition
-            "nombre_heures_travaillees",                    # Non utilisé dans le modèle
-            "id_employee",                                  # Identifiant (pas une feature)
-            "ayant_enfants",                                # Valeur unique
-            "nombre_employee_sous_responsabilite",          # Valeur unique
+            "a_quitte_l_entreprise",  # Déjà converti en Attrition
+            "nombre_heures_travaillees",  # Non utilisé dans le modèle
+            "id_employee",  # Identifiant (pas une feature)
+            "ayant_enfants",  # Valeur unique
+            "nombre_employee_sous_responsabilite",  # Valeur unique
         ],
-        errors="ignore",            # Ignorer si la colonne n'existe pas
+        errors="ignore",  # Ignorer si la colonne n'existe pas
         inplace=True,
     )
 
@@ -364,10 +363,12 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     # Les modèles préfèrent les nombres (0/1) plutôt que les chaînes ("Oui"/"Non")
     if "heure_supplementaires" in df_.columns and df_["heure_supplementaires"].dtype == "object":
         df_["heure_supplementaires"] = (
-            df_["heure_supplementaires"].astype(str)        # Convertir en chaîne
-            .str.strip().str.lower()                        # Supprimer les espaces et passage en minuscules
-            .map({"oui": 1, "non": 0})                      # Mapper oui->1, non->0
-            .astype("Int64")                                # Convertir en entier (avec NaN support)
+            df_["heure_supplementaires"]
+            .astype(str)  # Convertir en chaîne
+            .str.strip()
+            .str.lower()  # Supprimer les espaces et passage en minuscules
+            .map({"oui": 1, "non": 0})  # Mapper oui->1, non->0
+            .astype("Int64")  # Convertir en entier (avec NaN support)
         )
 
     # ========================================================================
@@ -375,10 +376,10 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     # ========================================================================
     # Problème : les modèles ne comprennent pas le texte ("R&D", "Commercial", etc.)
     # Solution : convertir en nombres avec des encodages
-    
+
     # Colonnes nominales (sans ordre) : département, poste, domaine_etude, statut_marital
     colonnes_nominales = [c for c in ["departement", "poste", "domaine_etude", "statut_marital"] if c in df_.columns]
-    
+
     # OneHotEncoder : crée une colonne par catégorie
     # Exemple : département "R&D" -> colonne "departement_R&D" = 1, autres = 0
     # drop="first" : supprime la première colonne (évite la colinéarité)
@@ -387,22 +388,22 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     try:
         ohe = OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore")
     except TypeError:
-         # Compatibilité avec les anciennes versions de scikit-learn
+        # Compatibilité avec les anciennes versions de scikit-learn
         ohe = OneHotEncoder(drop="first", sparse=False, handle_unknown="ignore")
 
     if colonnes_nominales:
         # Appliquer l'encodage OneHot
         # fit_transform : apprend les catégories ET transforme les données
         df_ohe = pd.DataFrame(
-            ohe.fit_transform(df_[colonnes_nominales]),                 # Encodage
-            columns=ohe.get_feature_names_out(colonnes_nominales),      # Noms des colonnes
-            index=df_.index,                                            # Conserver l'index
+            ohe.fit_transform(df_[colonnes_nominales]),  # Encodage
+            columns=ohe.get_feature_names_out(colonnes_nominales),  # Noms des colonnes
+            index=df_.index,  # Conserver l'index
         )
-         # Supprimer les colonnes originales et ajouter les colonnes encodées
+        # Supprimer les colonnes originales et ajouter les colonnes encodées
         df_.drop(columns=colonnes_nominales, inplace=True)
         df_ = pd.concat([df_, df_ohe], axis=1)
     else:
-        ohe = None       # Pas d'encodage si pas de colonnes nominales
+        ohe = None  # Pas d'encodage si pas de colonnes nominales
 
     # OrdinalEncoder : pour les colonnes avec un ordre naturel
     # Exemple : "Aucun" < "Occasionnel" < "Frequent"
@@ -445,11 +446,11 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     # Ratio d'ancienneté : années dans l'entreprise / années d'expérience totale
     # Plus proche de 1 = l'employé a passé toute sa carrière dans l'entreprise
     new_cols["ratio_anciennete"] = make_ratio(df_model, "annees_dans_l_entreprise", "annee_experience_totale")
-    
+
     # Ratio poste : années dans le poste actuel / années dans l'entreprise
     # Plus proche de 1 = l'employé est dans le même poste depuis longtemps
     new_cols["ratio_poste"] = make_ratio(df_model, "annees_dans_le_poste_actuel", "annees_dans_l_entreprise")
-    
+
     # Ratio formations : nombre de formations / années dans l'entreprise
     # Plus élevé = l'employé se forme beaucoup
     new_cols["ratio_formations"] = make_ratio(df_model, "nb_formations_suivies", "annees_dans_l_entreprise")
@@ -457,9 +458,9 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     # Écart d'évaluation : note actuelle - note précédente
     # Positif = amélioration, négatif = détérioration
     if {"note_evaluation_actuelle", "note_evaluation_precedente"}.issubset(df_model.columns):
-        new_cols["ecart_evaluation"] = (
-            df_model["note_evaluation_actuelle"] - df_model["note_evaluation_precedente"]
-        ).fillna(0.0)
+        new_cols["ecart_evaluation"] = (df_model["note_evaluation_actuelle"] - df_model["note_evaluation_precedente"]).fillna(
+            0.0
+        )
         # Supprimer la note précédente (déjà utilisée dans l'écart)
         df_model = df_model.drop(columns="note_evaluation_precedente", errors="ignore")
     else:
@@ -491,11 +492,11 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
     # Certaines colonnes sont très corrélées (redondantes)
     # Les supprimer évite le surapprentissage (overfitting)
     colonnes_a_supprimer = [
-        "annees_dans_le_poste_actuel",              # Déjà utilisé dans ratio_poste
-        "annes_sous_responsable_actuel",            # Peu informatif
-        "poste_Ressources Humaines",                # Catégorie rare et très corrélée
-        "annee_experience_totale",                  # Déjà utilisé dans ratio_anciennete
-        "niveau_hierarchique_poste",                # Déjà utilisé dans ratio_salaire_niveau
+        "annees_dans_le_poste_actuel",  # Déjà utilisé dans ratio_poste
+        "annes_sous_responsable_actuel",  # Peu informatif
+        "poste_Ressources Humaines",  # Catégorie rare et très corrélée
+        "annee_experience_totale",  # Déjà utilisé dans ratio_anciennete
+        "niveau_hierarchique_poste",  # Déjà utilisé dans ratio_salaire_niveau
     ]
     df_model.drop(columns=[c for c in colonnes_a_supprimer if c in df_model.columns], inplace=True, errors="ignore")
 
@@ -514,17 +515,18 @@ def prepare_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[OneHotEncoder
 # OPTIMISATION DES HYPERPARAMÈTRES AVEC OPTUNA
 # ============================================================================
 
+
 def _compute_scale_pos_weight(y: pd.Series) -> float:
     """
     Calcule le poids pour équilibrer les classes (déséquilibre positif/négatif).
-    
+
     QU'EST-CE QUE LE DÉSÉQUILIBRE DE CLASSES ?
     ==========================================
     Si on a 90% d'employés qui restent et 10% qui partent, le modèle peut
     toujours prédire "reste" et avoir 90% de précision (mais inutile !).
-    
+
     scale_pos_weight permet de donner plus d'importance aux exemples positifs (départ).
-    
+
     RETOUR :
     ========
     float : ratio (#négatifs / #positifs)
@@ -552,11 +554,11 @@ def _optuna_objective_factory(
     def objective(trial: optuna.trial.Trial) -> float:
         """
         Fonction objective appelée par Optuna pour chaque essai.
-        
+
         PARAMÈTRES :
         ============
         - trial : objet Optuna qui propose des hyperparamètres à tester
-        
+
         RETOUR :
         ========
         float : AUC sur le jeu de validation (à maximiser)
@@ -566,44 +568,36 @@ def _optuna_objective_factory(
         # ====================================================================
         # Optuna propose des valeurs pour chaque hyperparamètre
         # trial.suggest_* : demande à Optuna de proposer une valeur
-        
+
         params = {
             **base_params,  # Paramètres de base (objectif, métrique, etc.)
-            
             # learning_rate (alias "eta") : vitesse d'apprentissage
             # Plus petit = apprentissage plus lent mais plus stable
             # log=True : recherche sur échelle logarithmique (0.001 à 0.3)
             "eta": trial.suggest_float("learning_rate", 1e-3, 0.3, log=True),
-            
             # max_depth : profondeur maximale des arbres
             # Plus profond = modèle plus complexe (risque de surapprentissage)
             "max_depth": trial.suggest_int("max_depth", 3, 10),
-            
             # min_child_weight : poids minimum des feuilles
             # Plus élevé = modèle plus simple (évite le surapprentissage)
             "min_child_weight": trial.suggest_float("min_child_weight", 1.0, 10.0),
-            
             # subsample : proportion d'échantillons utilisés pour chaque arbre
             # 0.5 = utilise 50% des données (réduit le surapprentissage)
             "subsample": trial.suggest_float("subsample", 0.5, 1.0),
-            
             # colsample_bytree : proportion de features utilisées pour chaque arbre
             # 0.5 = utilise 50% des colonnes (réduit le surapprentissage)
             "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
-            
             # lambda (reg_lambda) : régularisation L2
             # Plus élevé = modèle plus simple (évite le surapprentissage)
             "lambda": trial.suggest_float("reg_lambda", 1e-3, 100, log=True),
-            
             # alpha (reg_alpha) : régularisation L1
             # Plus élevé = modèle plus simple (sélection de features)
             "alpha": trial.suggest_float("reg_alpha", 1e-3, 10, log=True),
-            
             # gamma : seuil minimum de gain pour diviser un nœud
             # Plus élevé = modèle plus simple (moins de divisions)
             "gamma": trial.suggest_float("gamma", 0.0, 5.0),
         }
-        
+
         # Nombre d'arbres (boosting rounds)
         # Plus d'arbres = modèle plus complexe (mais risque de surapprentissage)
         num_boost_round = trial.suggest_int("n_estimators", 300, 1200, step=100)
@@ -615,13 +609,13 @@ def _optuna_objective_factory(
         # Exemple : si AUC ne s'améliore pas pendant 50 rounds, arrêter
         evals_result = {}
         booster = xgb.train(
-            params=params,                    # Hyperparamètres proposés par Optuna
-            dtrain=dtrain,                     # Données d'entraînement
+            params=params,  # Hyperparamètres proposés par Optuna
+            dtrain=dtrain,  # Données d'entraînement
             num_boost_round=num_boost_round,  # Nombre maximum d'arbres
-            evals=[(dvalid, "valid")],         # Jeu de validation (pour early stopping)
-            early_stopping_rounds=50,          # Patience (50 rounds sans amélioration)
-            verbose_eval=False,                # Ne pas afficher les logs
-            evals_result=evals_result,         # Capture des courbes
+            evals=[(dvalid, "valid")],  # Jeu de validation (pour early stopping)
+            early_stopping_rounds=50,  # Patience (50 rounds sans amélioration)
+            verbose_eval=False,  # Ne pas afficher les logs
+            evals_result=evals_result,  # Capture des courbes
         )
 
         # --- reconstruction robuste du meilleur round + score ---
@@ -652,7 +646,6 @@ def _optuna_objective_factory(
 
         return auc_val
 
-
     return objective
 
 
@@ -665,24 +658,24 @@ def tune_with_optuna(
 ) -> Dict[str, Any]:
     """
     Lance l'optimisation Optuna pour trouver les meilleurs hyperparamètres.
-    
+
     QU'EST-CE QU'OPTUNA ?
     =====================
     Optuna est une bibliothèque d'optimisation d'hyperparamètres.
     Elle teste automatiquement différentes combinaisons pour trouver les meilleures.
-    
+
     ALGORITHME TPE (Tree-structured Parzen Estimator) :
     ===================================================
     - Apprend des essais précédents pour proposer de meilleures valeurs
     - Plus intelligent qu'une recherche aléatoire ou une grille
-    
+
     PARAMÈTRES :
     ============
     - X_train_full, y_train_full : toutes les données d'entraînement
     - n_trials : nombre d'essais Optuna (défaut : 60)
     - timeout : temps maximum en secondes (défaut : None = pas de limite)
     - seed : graine aléatoire pour la reproductibilité
-    
+
     RETOUR :
     ========
     Dict contenant :
@@ -693,10 +686,11 @@ def tune_with_optuna(
     # Diviser les données d'entraînement en train/validation
     # 15% pour la validation (pour guider early stopping)
     X_tr, X_val, y_tr, y_val = train_test_split(
-        X_train_full, y_train_full, 
-        test_size=0.15,           # 15% pour validation
-        random_state=seed,        # Graine pour reproductibilité
-        stratify=y_train_full     # Conserver la proportion de classes
+        X_train_full,
+        y_train_full,
+        test_size=0.15,  # 15% pour validation
+        random_state=seed,  # Graine pour reproductibilité
+        stratify=y_train_full,  # Conserver la proportion de classes
     )
 
     # ========================================================================
@@ -704,11 +698,11 @@ def tune_with_optuna(
     # ========================================================================
     base_params = {
         "objective": "binary:logistic",  # Classification binaire (logistique)
-        "eval_metric": "auc",            # Métrique à optimiser (AUC)
-        "tree_method": "hist",           # Méthode de construction d'arbres (rapide)
+        "eval_metric": "auc",  # Métrique à optimiser (AUC)
+        "tree_method": "hist",  # Méthode de construction d'arbres (rapide)
         # "gpu_hist" si GPU disponible (plus rapide)
-        "seed": seed,                    # Graine aléatoire
-        "verbosity": 0,                  # Pas de logs
+        "seed": seed,  # Graine aléatoire
+        "verbosity": 0,  # Pas de logs
         "scale_pos_weight": _compute_scale_pos_weight(y_train_full),  # Équilibrage des classes
     }
 
@@ -719,8 +713,8 @@ def tune_with_optuna(
     # CRÉER L'ÉTUDE OPTUNA
     # ========================================================================
     study = optuna.create_study(
-        direction="maximize",              # Maximiser l'AUC
-        sampler=TPESampler(seed=seed),     # Algorithme TPE
+        direction="maximize",  # Maximiser l'AUC
+        sampler=TPESampler(seed=seed),  # Algorithme TPE
         pruner=MedianPruner(n_warmup_steps=10),  # Arrêter les essais peu prometteurs
     )
 
@@ -728,11 +722,11 @@ def tune_with_optuna(
     # LANCER L'OPTIMISATION
     # ========================================================================
     study.optimize(
-        objective,                    # Fonction à optimiser
-        n_trials=n_trials,           # Nombre d'essais
-        timeout=timeout,             # Temps maximum
-        show_progress_bar=True,      # Afficher la barre de progression
-        gc_after_trial=True,         # Nettoyer la mémoire après chaque essai
+        objective,  # Fonction à optimiser
+        n_trials=n_trials,  # Nombre d'essais
+        timeout=timeout,  # Temps maximum
+        show_progress_bar=True,  # Afficher la barre de progression
+        gc_after_trial=True,  # Nettoyer la mémoire après chaque essai
     )
 
     print("🔎 Meilleur AUC (val) :", study.best_value)
@@ -743,10 +737,7 @@ def tune_with_optuna(
     # ========================================================================
     # Convertir les hyperparamètres d'Optuna au format XGBoost
     best = study.best_trial.params
-    best_iteration = study.best_trial.user_attrs.get(
-        "best_iteration",
-        int(best.get("n_estimators", 500))
-    )
+    best_iteration = study.best_trial.user_attrs.get("best_iteration", int(best.get("n_estimators", 500)))
     best_iteration = int(best_iteration)
 
     print(f"✅ best_iteration (depuis Optuna) = {best_iteration}")  # Contrôle
@@ -775,10 +766,11 @@ def tune_with_optuna(
 # ENTRAÎNEMENT PRINCIPAL
 # ============================================================================
 
+
 def train_model():
     """
     Pipeline complet d'entraînement du modèle.
-    
+
     ÉTAPES :
     ========
     1. Charger les données depuis PostgreSQL
@@ -788,7 +780,7 @@ def train_model():
     5. Entraîner le modèle final avec les meilleurs hyperparamètres
     6. Évaluer sur le jeu de test
     7. Sauvegarder le modèle et tous les artefacts
-    
+
     RETOUR :
     ========
     Tuple contenant :
@@ -830,27 +822,23 @@ def train_model():
     # 80% pour l'entraînement, 20% pour le test final
     # stratify=y : conserve la proportion de classes (évite le déséquilibre)
     X_train_full, X_test, y_train_full, y_test = train_test_split(
-        X, y, 
-        test_size=0.2,           # 20% pour le test
-        random_state=1042,       # Graine pour reproductibilité
-        stratify=y               # Conserver la proportion de classes
+        X,
+        y,
+        test_size=0.2,  # 20% pour le test
+        random_state=1042,  # Graine pour reproductibilité
+        stratify=y,  # Conserver la proportion de classes
     )
 
     # ========================================================================
     # ÉTAPE 4 : OPTIMISER LES HYPERPARAMÈTRES AVEC OPTUNA
     # ========================================================================
     # Récupérer les paramètres depuis les variables d'environnement
-    n_trials = int(os.getenv("OPTUNA_TRIALS", "60"))      # Nombre d'essais
-    timeout_env = os.getenv("OPTUNA_TIMEOUT", None)       # Timeout
+    n_trials = int(os.getenv("OPTUNA_TRIALS", "60"))  # Nombre d'essais
+    timeout_env = os.getenv("OPTUNA_TIMEOUT", None)  # Timeout
     timeout = int(timeout_env) if timeout_env is not None else None
 
     print(f"🧪 Lancement d'Optuna (n_trials={n_trials}, timeout={timeout}) ...")
-    tune_result = tune_with_optuna(
-        X_train_full, y_train_full,
-        n_trials=n_trials,
-        timeout=timeout,
-        seed=1042
-    )
+    tune_result = tune_with_optuna(X_train_full, y_train_full, n_trials=n_trials, timeout=timeout, seed=1042)
     best_params = tune_result["best_params"]
     best_num_boost_round = int(tune_result["best_num_boost_round"])
     study: optuna.Study = tune_result["study"]
@@ -905,9 +893,9 @@ def train_model():
     # b) Sauvegarder les préprocesseurs et la liste des features
     # IMPORTANT : ces fichiers sont nécessaires pour faire des prédictions en production
     # L'ordre des features doit être exactement le même qu'à l'entraînement
-    joblib.dump(ohe, models_dir / "onehot_encoder.joblib")              # Encodeur OneHot
+    joblib.dump(ohe, models_dir / "onehot_encoder.joblib")  # Encodeur OneHot
     joblib.dump(ordinal_encoder, models_dir / "ordinal_encoder.joblib")  # Encodeur ordinal
-    feature_names = list(X.columns)                                      # Liste des features (ordre)
+    feature_names = list(X.columns)  # Liste des features (ordre)
     joblib.dump(feature_names, models_dir / "feature_names.joblib")
 
     # c) Sauvegarder les meilleurs hyperparamètres (pour audit/reproductibilité)
@@ -934,4 +922,3 @@ def train_model():
 # Si ce script est exécuté directement (pas importé), lancer l'entraînement
 if __name__ == "__main__":
     train_model()
-

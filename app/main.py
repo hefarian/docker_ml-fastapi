@@ -11,7 +11,7 @@
 # ============================
 # API = Application Programming Interface (Interface de Programmation)
 # REST = Representational State Transfer (architecture web)
-# 
+#
 # En termes simples : c'est un service web qui accepte des requêtes HTTP
 # (GET, POST, etc.) et retourne des réponses JSON.
 #
@@ -30,17 +30,19 @@
 
 # app/main.py
 
+import traceback  # importé mais non utilisé dans ce fichier ; utile si tu veux logger les stack traces
+from pathlib import Path
+
+import joblib
+from database import get_database
+
 # ============================================================================
 # IMPORTS
 # ============================================================================
-from fastapi import FastAPI, HTTPException, Header
-from schemas import PredictRequest, PredictResponse, HealthResponse
+from fastapi import FastAPI, Header, HTTPException
 from model import get_model
-from database import get_database
+from schemas import HealthResponse, PredictRequest, PredictResponse
 from settings import settings
-from pathlib import Path
-import joblib
-import traceback  # importé mais non utilisé dans ce fichier ; utile si tu veux logger les stack traces
 
 # ============================================================================
 # INSTANCIATION DE L'APPLICATION FASTAPI
@@ -51,8 +53,9 @@ import traceback  # importé mais non utilisé dans ce fichier ; utile si tu veu
 app = FastAPI(
     title="API de Prédiction d'Attrition",
     description="API pour prédire l'attrition des employés avec un modèle XGBoost",
-    version="1.0.0"
+    version="1.0.0",
 )
+
 
 # ============================================================================
 # ENDPOINT : /health (Vérification de santé)
@@ -61,30 +64,30 @@ app = FastAPI(
 def health():
     """
     Endpoint de santé de l'API.
-    
+
     QU'EST-CE QU'UN ENDPOINT DE SANTÉ ?
     ====================================
     Un endpoint de santé permet de vérifier que l'API et ses dépendances
     fonctionnent correctement. C'est comme un "ping" pour l'API.
-    
+
     UTILISATIONS :
     ==============
     - Monitoring : les outils de surveillance peuvent vérifier la santé automatiquement
     - CI/CD : vérifier que le déploiement a réussi
     - Debugging : diagnostiquer rapidement les problèmes
-    
+
     Objectifs :
     - Vérifier la disponibilité des dépendances critiques :
         * Chargement du modèle (artefacts présents, pas corrompus).
         * Connexion à la base de données (ping basique).
     - Retourner un statut global "ok" si tout est disponible, sinon "degraded".
-    
+
     Notes d'implémentation :
     - On encapsule chaque vérification dans un try/except pour ne pas court-circuiter l'autre.
     - En prod, on pourrait :
         * tracer l'exception (logs) pour diagnostic.
         * différencier "degraded" par service (ex: model_only, db_only).
-    
+
     RETOUR :
     ========
     HealthResponse avec :
@@ -102,7 +105,7 @@ def health():
     try:
         # get_model() : charge le modèle (singleton, mis en cache)
         # Si le modèle n'est pas disponible, une exception est levée
-        _ = get_model()     # tente de charger ou récupérer le singleton modèle
+        _ = get_model()  # tente de charger ou récupérer le singleton modèle
         model_loaded = True
     except Exception:
         # Ici on ignore l'exception pour ne pas faire échouer l'endpoint health entièrement.
@@ -132,11 +135,8 @@ def health():
     status = "ok" if model_loaded and db_connected else "degraded"
 
     # La réponse est validée/sérialisée par le modèle Pydantic HealthResponse
-    return HealthResponse(
-        status=status,
-        model_loaded=model_loaded,
-        db_connected=db_connected
-    )
+    return HealthResponse(status=status, model_loaded=model_loaded, db_connected=db_connected)
+
 
 # ============================================================================
 # ENDPOINT : / (Page d'accueil)
@@ -145,18 +145,18 @@ def health():
 def read_root():
     """
     Endpoint racine (landing endpoint) avec informations et liens utiles.
-    
+
     QU'EST-CE QU'UN ENDPOINT RACINE ?
     ==================================
     L'endpoint "/" est la page d'accueil de l'API.
     Quand quelqu'un accède à https://docker-ml-fastapi.onrender.com, c'est cette fonction qui répond.
-    
+
     UTILITÉ :
     =========
     - Donne une vue d'ensemble de l'API
     - Liste les endpoints disponibles
     - Fournit des informations de base (nom, version)
-    
+
     Retourne un petit manifeste JSON :
     - message : nom de l'API
     - version : version de l'API
@@ -166,13 +166,14 @@ def read_root():
         "message": "API de Prédiction d'Attrition",
         "version": "1.0.0",
         "endpoints": {
-            "health": "/health",           # Vérification de santé
-            "predict": "/predict",         # Prédiction d'attrition
-            "docs": "/docs",               # Swagger UI auto (générée par FastAPI)
-            "predictions": "/predictions", # Historique des prédictions
-            "model_info": "/model-info"    # Informations sur le modèle
-        }
+            "health": "/health",  # Vérification de santé
+            "predict": "/predict",  # Prédiction d'attrition
+            "docs": "/docs",  # Swagger UI auto (générée par FastAPI)
+            "predictions": "/predictions",  # Historique des prédictions
+            "model_info": "/model-info",  # Informations sur le modèle
+        },
     }
+
 
 # ============================================================================
 # ENDPOINT : /db-test (Test de connexion à la base)
@@ -181,29 +182,29 @@ def read_root():
 def db_test():
     """
     Endpoint simple pour tester la connectivité à la base de données.
-    
+
     QU'EST-CE QUE CE ENDPOINT ?
     ============================
     Cet endpoint teste uniquement la connexion à PostgreSQL.
     Contrairement à /health, il ne teste pas le modèle.
-    
+
     UTILITÉ :
     =========
     - Diagnostiquer rapidement un problème de DB indépendamment du modèle
     - Vérifier que les credentials sont corrects
     - Tester la connectivité réseau
-    
+
     Comportement :
     - Si la DB répond à SELECT 1, renvoie {"status": "ok", ...}
     - Sinon lève une HTTPException 500.
-    
+
     Intérêt :
     - Utile pour diagnostiquer rapidement un problème de DB indépendamment du modèle.
     """
     try:
         # Récupérer l'instance Database
         db = get_database()
-        
+
         # Tester la connexion
         if db.test_connection():
             # Connexion OK
@@ -218,6 +219,7 @@ def db_test():
         # En prod, préférer un message générique côté client et logger l'exception côté serveur.
         raise HTTPException(status_code=500, detail=f"Erreur DB: {e}")
 
+
 # ============================================================================
 # ENDPOINT : /predict (Prédiction d'attrition)
 # ============================================================================
@@ -225,12 +227,12 @@ def db_test():
 def predict(payload: PredictRequest):
     """
     Prédit l'attrition pour un employé (modèle XGBoost).
-    
+
     QU'EST-CE QUE CET ENDPOINT ?
     ============================
     C'est l'endpoint principal de l'API. Il prend les données d'un employé
     et retourne une prédiction : l'employé va-t-il quitter l'entreprise ?
-    
+
     COMMENT ÇA MARCHE ?
     ===================
     1. Le client envoie une requête POST avec les données de l'employé
@@ -238,16 +240,16 @@ def predict(payload: PredictRequest):
     3. Le modèle fait une prédiction
     4. La prédiction est enregistrée en base de données
     5. La réponse est retournée au client
-    
+
     Entrée:
     - payload: PredictRequest (Pydantic), inclut employee_data (features d'entrée)
-    
+
     Sortie (PredictResponse):
     - prediction (int): 0 = reste, 1 = quitte
     - probability (float): proba associée à la classe prédite
     - model_version (str): version du modèle (pour traçabilité)
     - prediction_id (int|None): identifiant de la ligne insérée en DB si l'enregistrement a réussi
-    
+
     Stratégie :
     1) Charger/récupérer le modèle via get_model() (pattern singleton/cache).
     2) Appeler model.predict(...) avec les données du payload (types validés par Pydantic).
@@ -293,7 +295,7 @@ def predict(payload: PredictRequest):
                 input_data=payload.employee_data.model_dump(),
                 prediction=prediction,
                 probability=probability,
-                model_version=settings.MODEL_VERSION  # version récupérée depuis la config
+                model_version=settings.MODEL_VERSION,  # version récupérée depuis la config
             )
         except Exception as db_error:
             # Choix UX : on ne bloque pas la route si l'enregistrement échoue (retourne quand même la prédiction).
@@ -308,7 +310,7 @@ def predict(payload: PredictRequest):
             prediction=prediction,
             probability=float(probability),  # cast explicite -> JSON (float natif)
             model_version=settings.MODEL_VERSION,
-            prediction_id=prediction_id
+            prediction_id=prediction_id,
         )
     except FileNotFoundError as e:
         # ====================================================================
@@ -316,10 +318,7 @@ def predict(payload: PredictRequest):
         # ====================================================================
         # Cas typique : artefacts du modèle absents (ex: après déploiement sans entraînement)
         # 503 = Service Unavailable, invite à exécuter le pipeline d'entraînement
-        raise HTTPException(
-            status_code=503,
-            detail=f"Modèle non disponible. Veuillez entraîner le modèle d'abord: {e}"
-        )
+        raise HTTPException(status_code=503, detail=f"Modèle non disponible. Veuillez entraîner le modèle d'abord: {e}")
     except Exception as e:
         # ====================================================================
         # ERREUR GÉNÉRIQUE
@@ -327,10 +326,8 @@ def predict(payload: PredictRequest):
         # Erreur générique de prédiction (données non conformes, bug dans le wrapper, etc.)
         # 400 = Bad Request : pour garder la distinction avec erreur serveur interne.
         # En prod : logger l'exception avec stack trace pour debug.
-        raise HTTPException(
-            status_code=400,
-            detail=f"Erreur de prédiction: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Erreur de prédiction: {str(e)}")
+
 
 # ============================================================================
 # ENDPOINT : /predictions (Historique des prédictions)
@@ -339,7 +336,7 @@ def predict(payload: PredictRequest):
 def get_predictions(limit: int = 100):
     """
     Récupère les dernières prédictions enregistrées.
-    
+
     QU'EST-CE QUE CET ENDPOINT ?
     ============================
     Cet endpoint permet de consulter l'historique des prédictions faites par l'API.
@@ -347,28 +344,28 @@ def get_predictions(limit: int = 100):
     - Analyser les prédictions passées
     - Déboguer des problèmes
     - Auditer l'utilisation de l'API
-    
+
     Paramètres (query) :
     - limit (int) : nombre maximum de lignes à retourner (défaut 100).
-    
+
     Exemple d'utilisation :
     - GET /predictions : retourne les 100 dernières prédictions
     - GET /predictions?limit=10 : retourne les 10 dernières prédictions
-    
+
     Comportement :
     - Lit depuis la DB via db.get_predictions(limit).
     - Sérialise proprement les champs :
         * probability -> float (compat JSON)
         * created_at -> ISO 8601 string (datetime -> .isoformat())
     - Renvoie un objet JSON contenant le nombre et la liste des prédictions.
-    
+
     Remarques :
     - Si le volume augmente, pense à une pagination (keyset pagination) et des index sur created_at.
     """
     try:
         # Récupérer l'instance Database
         db = get_database()
-        
+
         # Récupérer les prédictions depuis la base
         predictions = db.get_predictions(limit=limit)
 
@@ -377,16 +374,16 @@ def get_predictions(limit: int = 100):
             "count": len(predictions),  # Nombre de prédictions retournées
             "predictions": [
                 {
-                    "id": p["id"],                                    # ID unique de la prédiction
-                    "input_data": p["input_data"],                    # dict JSON (si colonne JSONB en DB)
-                    "prediction": p["prediction"],                    # Prédiction (0 ou 1)
-                    "probability": float(p["probability"]),           # cast explicite -> JSON-friendly
-                    "model_version": p["model_version"],              # Version du modèle utilisé
+                    "id": p["id"],  # ID unique de la prédiction
+                    "input_data": p["input_data"],  # dict JSON (si colonne JSONB en DB)
+                    "prediction": p["prediction"],  # Prédiction (0 ou 1)
+                    "probability": float(p["probability"]),  # cast explicite -> JSON-friendly
+                    "model_version": p["model_version"],  # Version du modèle utilisé
                     # created_at : datetime -> ISO8601 ; protège si la clé n'existe pas
-                    "created_at": p["created_at"].isoformat() if p.get("created_at") else None
+                    "created_at": p["created_at"].isoformat() if p.get("created_at") else None,
                 }
                 for p in predictions  # Liste en compréhension : crée un dict pour chaque prédiction
-            ]
+            ],
         }
     except Exception as e:
         # Erreur côté base (connexion, requête, sérialisation...)
@@ -401,7 +398,7 @@ def get_predictions(limit: int = 100):
 def model_info():
     """
     Retourne des métadonnées sur le modèle XGBoost et ses artefacts.
-    
+
     QU'EST-CE QUE CET ENDPOINT ?
     ============================
     Cet endpoint fournit des informations techniques sur le modèle :
@@ -410,20 +407,20 @@ def model_info():
     - Nombre de features
     - Hyperparamètres utilisés
     - Chemins des fichiers
-    
+
     UTILITÉ :
     =========
     - Debugging : vérifier quel modèle est chargé
     - Audit : connaître les hyperparamètres utilisés
     - Monitoring : vérifier la version du modèle
-    
+
     Contenu :
     - type de modèle, version
     - nombre de features et échantillon des noms
     - best_iteration / best_score (si early stopping)
     - chemins des artefacts (booster JSON, encoders, feature_names, best_params)
     - meilleurs hyperparamètres (Optuna) si disponibles
-    
+
     Stratégie :
     1) Charger le modèle (mêmes artefacts que pour la prédiction).
     2) Déduire le dossier des modèles à partir de settings.MODEL_PATH (supposé pointer un artefact).
@@ -458,8 +455,8 @@ def model_info():
         # ====================================================================
         # Construction du bloc d'informations
         info = {
-            "model_type": "xgboost.Booster",                    # Type de modèle
-            "model_version": settings.MODEL_VERSION,            # Version du modèle
+            "model_type": "xgboost.Booster",  # Type de modèle
+            "model_version": settings.MODEL_VERSION,  # Version du modèle
             "n_features": len(model.feature_names) if hasattr(model, "feature_names") else None,  # Nombre de features
             "features_sample": model.feature_names[:10] if hasattr(model, "feature_names") else None,  # Échantillon des noms
             "best_iteration": int(best_iter) if best_iter is not None else None,  # Meilleur nombre d'itérations
@@ -484,8 +481,9 @@ def model_info():
                 best_art = joblib.load(best_params_path)
                 # On sécurise l'accès via .get(); conversion de types pour JSON
                 info["best_params"] = best_art.get("best_params")
-                info["best_num_boost_round"] = int(best_art.get("best_num_boost_round")) \
-                    if best_art.get("best_num_boost_round") is not None else None
+                info["best_num_boost_round"] = (
+                    int(best_art.get("best_num_boost_round")) if best_art.get("best_num_boost_round") is not None else None
+                )
             except Exception as e:
                 # Ne bloque pas l'endpoint ; on informe seulement du problème de lecture
                 info["best_params_error"] = f"Impossible de charger xgb_best_params.joblib: {e}"
@@ -500,16 +498,10 @@ def model_info():
 
     except FileNotFoundError as e:
         # Artefacts modèle manquants (ex: déploiement avant entraînement)
-        raise HTTPException(
-            status_code=503,
-            detail=f"Modèle non disponible. Veuillez entraîner le modèle d'abord: {e}"
-        )
+        raise HTTPException(status_code=503, detail=f"Modèle non disponible. Veuillez entraîner le modèle d'abord: {e}")
     except Exception as e:
         # Problème générique d'accès/lecture/attributs du modèle ou des artefacts
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erreur lors de la récupération des informations modèle: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la récupération des informations modèle: {str(e)}")
 
 
 # ============================================================================
@@ -552,50 +544,43 @@ async def trigger_training(authorization: str = Header(None)):
     curl -X POST https://docker-ml-fastapi.onrender.com/admin/train-model/ \
       -H "Authorization: Bearer votre-token-secret"
     """
-    import subprocess
     import os
-    
+    import subprocess
+
     # ========================================================================
     # VÉRIFICATION DE L'AUTHENTIFICATION
     # ========================================================================
     # Récupérer le token depuis les variables d'environnement
     ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
-    
+
     # Si ADMIN_TOKEN est défini, vérifier l'authentification
     if ADMIN_TOKEN:
         # Vérifier que le header Authorization est présent
         if not authorization:
             raise HTTPException(
                 status_code=401,
-                detail="Token d'authentification manquant. Envoyez-le dans le header Authorization: Bearer <token>"
+                detail="Token d'authentification manquant. Envoyez-le dans le header Authorization: Bearer <token>",
             )
-        
+
         # Vérifier que le token correspond
         expected_auth = f"Bearer {ADMIN_TOKEN}"
         if authorization != expected_auth:
-            raise HTTPException(
-                status_code=401,
-                detail="Token d'authentification invalide"
-            )
-    
+            raise HTTPException(status_code=401, detail="Token d'authentification invalide")
+
     # ========================================================================
     # VÉRIFICATION DES PRÉREQUIS
     # ========================================================================
     # Vérifier que DATABASE_URL est définie
     if not os.getenv("DATABASE_URL"):
         raise HTTPException(
-            status_code=500,
-            detail="DATABASE_URL non définie. Configurez-la dans les variables d'environnement Render."
+            status_code=500, detail="DATABASE_URL non définie. Configurez-la dans les variables d'environnement Render."
         )
-    
+
     # Vérifier que train_model.py existe
     train_script = Path("train_model.py")
     if not train_script.exists():
-        raise HTTPException(
-            status_code=500,
-            detail=f"Fichier train_model.py introuvable dans {Path.cwd()}"
-        )
-    
+        raise HTTPException(status_code=500, detail=f"Fichier train_model.py introuvable dans {Path.cwd()}")
+
     # ========================================================================
     # LANCEMENT DE L'ENTRAÎNEMENT
     # ========================================================================
@@ -603,7 +588,7 @@ async def trigger_training(authorization: str = Header(None)):
         # Créer le dossier models/ s'il n'existe pas
         models_dir = Path("models")
         models_dir.mkdir(exist_ok=True)
-        
+
         # Exécuter le script d'entraînement en arrière-plan
         # subprocess.Popen : lance un processus sans attendre sa fin
         # stdout/stderr : rediriger vers des pipes (pour les logs)
@@ -612,34 +597,32 @@ async def trigger_training(authorization: str = Header(None)):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            cwd="/app"  # Répertoire de travail (Render utilise /app)
+            cwd="/app",  # Répertoire de travail (Render utilise /app)
         )
-        
+
         return {
             "status": "started",
             "message": "Entraînement démarré avec succès",
             "pid": process.pid,
             "note": "L'entraînement s'exécute en arrière-plan. Vérifiez les logs Render pour suivre la progression.",
             "estimated_time": "10-30 minutes selon OPTUNA_TRIALS",
-            "logs": "Consultez les logs Render pour voir la progression en temps réel"
+            "logs": "Consultez les logs Render pour voir la progression en temps réel",
         }
     except Exception as e:
         # En cas d'erreur lors du lancement
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erreur lors du démarrage de l'entraînement: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erreur lors du démarrage de l'entraînement: {str(e)}")
+
+
 # @app.get("/debug/tables")
 # def debug_tables():
 #     import psycopg2
 #     import os
 #     conn = psycopg2.connect(os.getenv("DATABASE_URL"))
 #     cur = conn.cursor()
-#     cur.execute("""SELECT table_schema, table_name   
+#     cur.execute("""SELECT table_schema, table_name
 #                 FROM information_schema.tables
 #                 WHERE table_type='BASE TABLE'
 #                 AND table_schema NOT IN ('pg_catalog', 'information_schema')
 #                 ORDER BY table_schema, table_name;""")
 #     rows = cur.fetchall()
 #     return rows
-

@@ -25,14 +25,13 @@ Module de chargement et utilisation du modèle XGBoost pour l'attrition.
 """
 
 from functools import lru_cache
-from typing import Tuple, Optional, Dict, Any
 from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 import joblib
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-
 from schemas import EmployeeData
 from settings import settings
 
@@ -43,14 +42,14 @@ from settings import settings
 class AttritionModel:
     """
     Modèle de prédiction d'attrition basé sur XGBoost (Booster).
-    
+
     QU'EST-CE QUE CETTE CLASSE ?
     ============================
     Cette classe encapsule :
     - Le modèle XGBoost entraîné (Booster)
     - Les préprocesseurs (OneHotEncoder, OrdinalEncoder)
     - La liste des features dans l'ordre attendu
-    
+
     COMMENT ÇA MARCHE ?
     ===================
     1. À l'initialisation : charge le modèle et les préprocesseurs depuis les fichiers
@@ -69,7 +68,7 @@ class AttritionModel:
     ):
         """
         Charge le Booster XGBoost et les artefacts de prétraitement/ordre des features.
-        
+
         QU'EST-CE QU'UN ARTEFACT ?
         ===========================
         Un artefact est un fichier nécessaire pour utiliser le modèle :
@@ -77,12 +76,12 @@ class AttritionModel:
         - ohe_path : l'encodeur OneHot (pour encoder les catégories)
         - ordinal_path : l'encodeur ordinal (pour encoder les fréquences)
         - feature_names_path : la liste des features dans l'ordre attendu
-        
+
         POURQUOI L'ORDRE DES FEATURES EST IMPORTANT ?
         =============================================
         XGBoost attend les features dans le même ordre qu'à l'entraînement.
         Si l'ordre change, les prédictions seront incorrectes !
-        
+
         PARAMÈTRES :
         ===========
         - booster_path : chemin vers le fichier xgb_booster.json
@@ -116,13 +115,13 @@ class AttritionModel:
     def _safe_divide(num: pd.Series, den: pd.Series, fill_value: float = 0.0) -> pd.Series:
         """
         Division sûre avec gestion NaN/Inf et division par zéro.
-        
+
         QU'EST-CE QU'UNE DIVISION SÛRE ?
         =================================
         En mathématiques, diviser par zéro est impossible.
         En programmation, cela crée des valeurs infinies (inf) ou NaN.
         Cette fonction évite ces problèmes.
-        
+
         EXEMPLE :
         =========
         >>> _safe_divide([10, 20], [2, 0], fill_value=0.0)
@@ -138,7 +137,7 @@ class AttritionModel:
     def _has_cols(df: pd.DataFrame, cols: list[str]) -> bool:
         """
         Vérifie que toutes les colonnes demandées existent dans df.
-        
+
         UTILITÉ :
         =========
         Évite les erreurs si une colonne est absente (données incomplètes).
@@ -152,12 +151,12 @@ class AttritionModel:
         """
         Transforme les données d'un employé (Pydantic) en vecteur de features
         aligné sur self.feature_names.
-        
+
         QU'EST-CE QUE CETTE MÉTHODE FAIT ?
         ===================================
         Cette méthode reproduit EXACTEMENT le même pipeline de préparation
         que lors de l'entraînement. C'est crucial pour que les prédictions soient correctes.
-        
+
         PIPELINE DE TRANSFORMATION :
         ============================
         1. Convertir Pydantic -> DataFrame
@@ -172,7 +171,7 @@ class AttritionModel:
         10. Nettoyer (NaN, infini)
         11. S'assurer que toutes les features attendues existent
         12. Réordonner selon l'ordre attendu
-        
+
         RETOUR :
         ========
         np.ndarray : matrice numpy avec les features dans l'ordre attendu
@@ -197,10 +196,10 @@ class AttritionModel:
                 # Convertir "11%" -> 0.11
                 df["augmentation_salaire_precedente"] = (
                     ser.str.replace("%", "", regex=False)
-                       .str.replace(",", ".", regex=False)
-                       .str.replace(r"\s+", "", regex=True)
-                       .pipe(pd.to_numeric, errors="coerce")
-                       .div(100.0)
+                    .str.replace(",", ".", regex=False)
+                    .str.replace(r"\s+", "", regex=True)
+                    .pipe(pd.to_numeric, errors="coerce")
+                    .div(100.0)
                 ).fillna(0.0)
 
         # ====================================================================
@@ -227,9 +226,7 @@ class AttritionModel:
         # Ordinal : les catégories ont un ordre (Aucun < Occasionnel < Frequent)
         if self.ordinal_encoder is not None and "frequence_deplacement" in df.columns:
             # S'assure qu'on manipule bien des str (pour éviter les erreurs)
-            df[["frequence_deplacement"]] = self.ordinal_encoder.transform(
-                df[["frequence_deplacement"]]
-            )
+            df[["frequence_deplacement"]] = self.ordinal_encoder.transform(df[["frequence_deplacement"]])
 
         # ====================================================================
         # ÉTAPE 4 : RECODAGE heure_supplementaires
@@ -238,12 +235,7 @@ class AttritionModel:
         if "heure_supplementaires" in df.columns:
             if df["heure_supplementaires"].dtype == object:
                 df["heure_supplementaires"] = (
-                    df["heure_supplementaires"]
-                    .astype(str)
-                    .str.strip()
-                    .str.lower()
-                    .map({"oui": 1, "non": 0})
-                    .fillna(0)
+                    df["heure_supplementaires"].astype(str).str.strip().str.lower().map({"oui": 1, "non": 0}).fillna(0)
                 )
 
         # ====================================================================
@@ -281,10 +273,9 @@ class AttritionModel:
         # Écart d'évaluation
         if self._has_cols(df, ["note_evaluation_actuelle", "note_evaluation_precedente"]):
             df["ecart_evaluation"] = (
-                (pd.to_numeric(df["note_evaluation_actuelle"], errors="coerce")
-                 - pd.to_numeric(df["note_evaluation_precedente"], errors="coerce"))
-                .fillna(0.0)
-            )
+                pd.to_numeric(df["note_evaluation_actuelle"], errors="coerce")
+                - pd.to_numeric(df["note_evaluation_precedente"], errors="coerce")
+            ).fillna(0.0)
         else:
             df["ecart_evaluation"] = 0.0
         df = df.drop(columns="note_evaluation_precedente", errors="ignore")
@@ -348,23 +339,23 @@ class AttritionModel:
     def predict(self, employee_data: EmployeeData) -> Tuple[int, float]:
         """
         Prédit l'attrition pour un employé.
-        
+
         QU'EST-CE QUE CETTE MÉTHODE FAIT ?
         ===================================
         1. Transforme les données de l'employé en features
         2. Fait la prédiction avec XGBoost
         3. Retourne la prédiction (0 ou 1) et la probabilité (0.0 à 1.0)
-        
+
         PARAMÈTRES :
         ===========
         - employee_data : données de l'employé (objet EmployeeData Pydantic)
-        
+
         RETOUR :
         ========
         Tuple[int, float] :
         - int : prédiction (0 = reste, 1 = quitte)
         - float : probabilité d'attrition (0.0 à 1.0)
-        
+
         EXEMPLE :
         =========
         >>> model = AttritionModel(...)
@@ -413,20 +404,20 @@ class AttritionModel:
 def get_model() -> AttritionModel:
     """
     Charge le modèle et les artefacts (avec cache).
-    
+
     QU'EST-CE QUE @lru_cache ?
     ==========================
     @lru_cache est un décorateur Python qui met en cache le résultat d'une fonction.
     - Première fois : la fonction s'exécute et charge le modèle
     - Fois suivantes : retourne directement le modèle mis en cache
     - maxsize=1 : garde seulement 1 résultat en cache
-    
+
     POURQUOI C'EST IMPORTANT ?
     ===========================
     - Évite de recharger le modèle à chaque requête (très lent)
     - Économise la mémoire (une seule instance en mémoire)
     - Pattern "singleton" : une seule instance partagée
-    
+
     COMMENT ÇA MARCHE ?
     ===================
     1. Première fois qu'on appelle get_model() :
@@ -436,11 +427,11 @@ def get_model() -> AttritionModel:
     2. Fois suivantes :
        - Retourne directement l'instance mise en cache
        - Pas de rechargement des fichiers
-    
+
     RETOUR :
     ========
     AttritionModel : instance du modèle (singleton)
-    
+
     EXCEPTIONS :
     ===========
     FileNotFoundError : si un fichier artefact est manquant

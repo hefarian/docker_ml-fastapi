@@ -18,13 +18,14 @@ EXÉCUTION :
 pytest tests/test_model.py -v
 """
 
-import pytest
-import sys
 import os
+import sys
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, mock_open
+from unittest.mock import MagicMock, Mock, mock_open, patch
+
 import numpy as np
 import pandas as pd
+import pytest
 
 # Configuration du PYTHONPATH
 root_dir = Path(__file__).parent.parent
@@ -34,7 +35,6 @@ os.chdir(app_dir)
 
 from model import AttritionModel, get_model
 from schemas import EmployeeData
-
 
 # Données d'employé de test (identiques à test_api.py)
 SAMPLE_EMPLOYEE = {
@@ -64,14 +64,14 @@ SAMPLE_EMPLOYEE = {
     "frequence_deplacement": "Occasionnel",
     "annees_depuis_la_derniere_promotion": 2,
     "annes_sous_responsable_actuel": 1,
-    "augmentation_salaire_precedente": 0.05
+    "augmentation_salaire_precedente": 0.05,
 }
 
 
 class TestAttritionModel:
     """
     Tests pour la classe AttritionModel.
-    
+
     STRATÉGIE DE TEST :
     ===================
     - Utiliser des mocks pour simuler XGBoost et les fichiers d'artefacts
@@ -79,11 +79,11 @@ class TestAttritionModel:
     - Tester la transformation des données
     - Tester les prédictions
     """
-    
+
     def test_attrition_model_init(self):
         """
         Test de l'initialisation d'AttritionModel.
-        
+
         CE QUE CE TEST VÉRIFIE :
         ========================
         - Le modèle charge correctement les artefacts (booster, encoders, feature_names)
@@ -91,14 +91,14 @@ class TestAttritionModel:
         # Mock de XGBoost Booster
         mock_booster = MagicMock()
         mock_booster.load_model = MagicMock()
-        
+
         # Mock des encodeurs
         mock_ohe = MagicMock()
         mock_ordinal = MagicMock()
         mock_feature_names = ["feature1", "feature2", "feature3"]
-        
-        with patch('model.xgb.Booster', return_value=mock_booster):
-            with patch('model.joblib.load') as mock_load:
+
+        with patch("model.xgb.Booster", return_value=mock_booster):
+            with patch("model.joblib.load") as mock_load:
                 # Configurer joblib.load pour retourner différents objets selon le chemin
                 def load_side_effect(path):
                     if "onehot" in str(path):
@@ -108,28 +108,28 @@ class TestAttritionModel:
                     elif "feature_names" in str(path):
                         return mock_feature_names
                     return None
-                
+
                 mock_load.side_effect = load_side_effect
-                
+
                 # Créer une instance AttritionModel
                 model = AttritionModel(
                     booster_path="models/xgb_booster.json",
                     ohe_path="models/onehot_encoder.joblib",
                     ordinal_path="models/ordinal_encoder.joblib",
-                    feature_names_path="models/feature_names.joblib"
+                    feature_names_path="models/feature_names.joblib",
                 )
-                
+
                 # Vérifications
                 assert model.booster == mock_booster
                 assert model.ohe == mock_ohe
                 assert model.ordinal_encoder == mock_ordinal
                 assert model.feature_names == mock_feature_names
                 mock_booster.load_model.assert_called_once_with("models/xgb_booster.json")
-    
+
     def test_safe_divide(self):
         """
         Test de la méthode statique _safe_divide.
-        
+
         CE QUE CE TEST VÉRIFIE :
         ========================
         - La division sûre gère correctement la division par zéro
@@ -140,33 +140,33 @@ class TestAttritionModel:
         den = pd.Series([2, 5, 3])
         result = AttritionModel._safe_divide(num, den, fill_value=0.0)
         assert result.tolist() == [5.0, 4.0, 10.0]
-        
+
         # Test division par zéro
         num = pd.Series([10, 20])
         den = pd.Series([2, 0])
         result = AttritionModel._safe_divide(num, den, fill_value=0.0)
         assert result.tolist() == [5.0, 0.0]
-    
+
     def test_has_cols(self):
         """
         Test de la méthode statique _has_cols.
-        
+
         CE QUE CE TEST VÉRIFIE :
         ========================
         - _has_cols() vérifie correctement la présence de colonnes
         """
         df = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]})
-        
+
         # Toutes les colonnes présentes
         assert AttritionModel._has_cols(df, ["col1", "col2"]) is True
-        
+
         # Colonne manquante
         assert AttritionModel._has_cols(df, ["col1", "col3"]) is False
-    
+
     def test_transform_employee_data(self):
         """
         Test de la transformation des données d'employé.
-        
+
         CE QUE CE TEST VÉRIFIE :
         ========================
         - _transform_employee_data() transforme correctement les données
@@ -175,20 +175,21 @@ class TestAttritionModel:
         # Mock de XGBoost Booster AVANT de créer l'instance
         mock_booster = MagicMock()
         mock_booster.load_model = MagicMock()
-        
+
         # Mock des encodeurs
         mock_ohe = MagicMock()
         mock_ordinal = MagicMock()
         mock_feature_names = ["age", "revenu_mensuel", "feature_encoded"]
-        
+
         # Configurer les mocks
         mock_ohe.transform.return_value = np.array([[1, 0, 0]])  # Exemple d'encodage
         mock_ohe.get_feature_names_out.return_value = ["feature_encoded"]
         mock_ordinal.transform.return_value = np.array([[1]])
-        
+
         # Mocker xgb.Booster et joblib.load AVANT de créer l'instance
-        with patch('model.xgb.Booster', return_value=mock_booster):
-            with patch('model.joblib.load') as mock_load:
+        with patch("model.xgb.Booster", return_value=mock_booster):
+            with patch("model.joblib.load") as mock_load:
+
                 def load_side_effect(path):
                     if "onehot" in str(path):
                         return mock_ohe
@@ -197,19 +198,19 @@ class TestAttritionModel:
                     elif "feature_names" in str(path):
                         return mock_feature_names
                     return None
-                
+
                 mock_load.side_effect = load_side_effect
-                
+
                 model = AttritionModel(
                     booster_path="models/xgb_booster.json",
                     ohe_path="models/onehot_encoder.joblib",
                     ordinal_path="models/ordinal_encoder.joblib",
-                    feature_names_path="models/feature_names.joblib"
+                    feature_names_path="models/feature_names.joblib",
                 )
-        
+
         # Créer un objet EmployeeData
         employee_data = EmployeeData(**SAMPLE_EMPLOYEE)
-        
+
         # Tester la transformation
         # Note : Cette transformation est complexe, on teste juste qu'elle ne lève pas d'exception
         # et qu'elle retourne un array numpy
@@ -221,11 +222,11 @@ class TestAttritionModel:
             # Si la transformation échoue à cause des mocks incomplets, c'est acceptable
             # L'important est de tester la structure
             pytest.skip(f"Transformation nécessite des mocks plus complets: {e}")
-    
+
     def test_predict(self):
         """
         Test de la méthode predict.
-        
+
         CE QUE CE TEST VÉRIFIE :
         ========================
         - predict() retourne une prédiction (0 ou 1) et une probabilité (0.0 à 1.0)
@@ -235,14 +236,15 @@ class TestAttritionModel:
         mock_booster.load_model = MagicMock()
         mock_booster.predict.return_value = np.array([0.75])  # Probabilité = 0.75
         mock_booster.best_iteration = None  # Pas de best_iteration
-        
+
         mock_ohe = MagicMock()
         mock_ordinal = MagicMock()
         mock_feature_names = ["age", "revenu_mensuel"]
-        
+
         # Mocker xgb.Booster et joblib.load AVANT de créer l'instance
-        with patch('model.xgb.Booster', return_value=mock_booster):
-            with patch('model.joblib.load') as mock_load:
+        with patch("model.xgb.Booster", return_value=mock_booster):
+            with patch("model.joblib.load") as mock_load:
+
                 def load_side_effect(path):
                     if "onehot" in str(path):
                         return mock_ohe
@@ -251,37 +253,37 @@ class TestAttritionModel:
                     elif "feature_names" in str(path):
                         return mock_feature_names
                     return None
-                
+
                 mock_load.side_effect = load_side_effect
-                
+
                 model = AttritionModel(
                     booster_path="models/xgb_booster.json",
                     ohe_path="models/onehot_encoder.joblib",
                     ordinal_path="models/ordinal_encoder.joblib",
-                    feature_names_path="models/feature_names.joblib"
+                    feature_names_path="models/feature_names.joblib",
                 )
-        
+
         # Mock de _transform_employee_data pour simplifier
-        with patch.object(model, '_transform_employee_data', return_value=np.array([[1.0, 2.0]])):
-            with patch('model.xgb.DMatrix') as mock_dmatrix:
+        with patch.object(model, "_transform_employee_data", return_value=np.array([[1.0, 2.0]])):
+            with patch("model.xgb.DMatrix") as mock_dmatrix:
                 mock_dmat = MagicMock()
                 mock_dmatrix.return_value = mock_dmat
-                
+
                 # Créer un objet EmployeeData
                 employee_data = EmployeeData(**SAMPLE_EMPLOYEE)
-                
+
                 # Faire une prédiction
                 prediction, probability = model.predict(employee_data)
-                
+
                 # Vérifications
                 assert prediction in [0, 1]  # Prédiction binaire
                 assert 0.0 <= probability <= 1.0  # Probabilité entre 0 et 1
                 assert probability == 0.75  # Probabilité retournée par le mock
-    
+
     def test_predict_with_best_iteration(self):
         """
         Test de predict() avec best_iteration (early stopping).
-        
+
         CE QUE CE TEST VÉRIFIE :
         ========================
         - Si best_iteration existe, elle est utilisée pour la prédiction
@@ -291,14 +293,15 @@ class TestAttritionModel:
         mock_booster.load_model = MagicMock()
         mock_booster.best_iteration = 10
         mock_booster.predict.return_value = np.array([0.65])
-        
+
         mock_ohe = MagicMock()
         mock_ordinal = MagicMock()
         mock_feature_names = ["age"]
-        
+
         # Mocker xgb.Booster et joblib.load AVANT de créer l'instance
-        with patch('model.xgb.Booster', return_value=mock_booster):
-            with patch('model.joblib.load') as mock_load:
+        with patch("model.xgb.Booster", return_value=mock_booster):
+            with patch("model.joblib.load") as mock_load:
+
                 def load_side_effect(path):
                     if "onehot" in str(path):
                         return mock_ohe
@@ -307,24 +310,24 @@ class TestAttritionModel:
                     elif "feature_names" in str(path):
                         return mock_feature_names
                     return None
-                
+
                 mock_load.side_effect = load_side_effect
-                
+
                 model = AttritionModel(
                     booster_path="models/xgb_booster.json",
                     ohe_path="models/onehot_encoder.joblib",
                     ordinal_path="models/ordinal_encoder.joblib",
-                    feature_names_path="models/feature_names.joblib"
+                    feature_names_path="models/feature_names.joblib",
                 )
-        
-        with patch.object(model, '_transform_employee_data', return_value=np.array([[1.0]])):
-            with patch('model.xgb.DMatrix') as mock_dmatrix:
+
+        with patch.object(model, "_transform_employee_data", return_value=np.array([[1.0]])):
+            with patch("model.xgb.DMatrix") as mock_dmatrix:
                 mock_dmat = MagicMock()
                 mock_dmatrix.return_value = mock_dmat
-                
+
                 employee_data = EmployeeData(**SAMPLE_EMPLOYEE)
                 prediction, probability = model.predict(employee_data)
-                
+
                 # Vérifier que predict() a été appelé avec iteration_range
                 mock_booster.predict.assert_called_once()
                 # Vérifier que iteration_range a été utilisé
@@ -335,110 +338,110 @@ class TestAttritionModel:
 class TestGetModel:
     """
     Tests pour la fonction get_model (singleton).
-    
+
     STRATÉGIE DE TEST :
     ===================
     - Tester que get_model() charge le modèle si les fichiers existent
     - Tester l'erreur si un fichier est manquant
     - Tester que le cache fonctionne
     """
-    
+
     def test_get_model_success(self):
         """
         Test de get_model() avec tous les fichiers présents.
-        
+
         CE QUE CE TEST VÉRIFIE :
         ========================
         - get_model() charge le modèle si tous les fichiers existent
         """
-        with patch('model.settings') as mock_settings:
+        with patch("model.settings") as mock_settings:
             mock_settings.MODEL_PATH = "models/xgb_booster.json"
-            
+
             # Mock des chemins de fichiers (tous existent)
-            with patch('model.Path.exists', return_value=True):
-                with patch('model.AttritionModel') as mock_model_class:
+            with patch("model.Path.exists", return_value=True):
+                with patch("model.AttritionModel") as mock_model_class:
                     mock_model_instance = MagicMock()
                     mock_model_class.return_value = mock_model_instance
-                    
+
                     # Réinitialiser le cache
                     get_model.cache_clear()
-                    
+
                     # Appeler get_model()
                     model = get_model()
-                    
+
                     # Vérifier que AttritionModel a été instanciée
                     assert mock_model_class.called
                     assert model == mock_model_instance
-    
+
     def test_get_model_missing_file(self):
         """
         Test de get_model() avec un fichier manquant.
-        
+
         CE QUE CE TEST VÉRIFIE :
         ========================
         - get_model() lève FileNotFoundError si un fichier est manquant
-        
+
         NOTE :
         =====
         Ce test mocke directement la vérification des fichiers en interceptant
         les appels à path.exists() dans la boucle de get_model().
         """
-        with patch('model.settings') as mock_settings:
+        with patch("model.settings") as mock_settings:
             mock_settings.MODEL_PATH = "models/xgb_booster.json"
-            
+
             # Réinitialiser le cache
             get_model.cache_clear()
-            
+
             # Mock simple : on mocke directement Path pour retourner des objets
             # dont exists() retourne False pour feature_names
             class MockPath:
                 def __init__(self, *args):
                     self._path = Path(*args) if args else Path(".")
-                
+
                 def __truediv__(self, other):
                     return MockPath(self._path / other)
-                
+
                 def __str__(self):
                     return str(self._path)
-                
+
                 def exists(self):
                     # feature_names.joblib n'existe pas
                     return "feature_names" not in str(self._path)
-                
+
                 @property
                 def parent(self):
                     return MockPath(self._path.parent)
-            
-            with patch('model.Path', MockPath):
+
+            with patch("model.Path", MockPath):
                 # Tester que l'exception est levée
                 with pytest.raises(FileNotFoundError) as exc_info:
                     get_model()
-                
+
                 assert "Fichier artefact manquant" in str(exc_info.value)
-    
+
     def test_get_model_cache(self):
         """
         Test du cache de get_model().
-        
+
         CE QUE CE TEST VÉRIFIE :
         ========================
         - get_model() retourne la même instance (cache)
         """
-        with patch('model.settings') as mock_settings:
+        with patch("model.settings") as mock_settings:
             mock_settings.MODEL_PATH = "models/xgb_booster.json"
-            
-            with patch('model.Path.exists', return_value=True):
-                with patch('model.AttritionModel') as mock_model_class:
+
+            with patch("model.Path.exists", return_value=True):
+                with patch("model.AttritionModel") as mock_model_class:
                     mock_model_instance = MagicMock()
                     mock_model_class.return_value = mock_model_instance
-                    
+
                     # Réinitialiser le cache
                     get_model.cache_clear()
-                    
+
                     # Appeler get_model() deux fois
                     model1 = get_model()
                     model2 = get_model()
-                    
+
                     # Vérifier que c'est la même instance (cache)
                     assert model1 is model2
                     # AttritionModel ne doit être instanciée qu'une seule fois
