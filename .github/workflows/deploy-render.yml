@@ -85,15 +85,28 @@ jobs:
           if [ "$BRANCH" = "main" ]; then
             # Branche main = production
             echo "🚀 Déploiement en production..."
+            # Vérifier que le webhook de production est défini
+            if [ -z "$HOOK_PROD" ]; then
+              echo "⚠️ RENDER_HOOK_PROD n'est pas défini. Déploiement ignoré."
+              exit 0
+            fi
             # Envoyer une requête POST au webhook de production
             # curl : outil en ligne de commande pour faire des requêtes HTTP
             # -X POST : méthode HTTP POST
-            curl -X POST "$HOOK_PROD"
+            # -f : échoue silencieusement si erreur HTTP
+            # -s : mode silencieux (pas de progression)
+            # -S : affiche les erreurs même en mode silencieux
+            curl -X POST -f -s -S "$HOOK_PROD" || echo "⚠️ Échec du déploiement en production"
           else
             # Branche dev = développement
             echo "🚀 Déploiement en développement..."
+            # Vérifier que le webhook de développement est défini
+            if [ -z "$HOOK_DEV" ]; then
+              echo "⚠️ RENDER_HOOK_DEV n'est pas défini. Déploiement ignoré."
+              exit 0
+            fi
             # Envoyer une requête POST au webhook de développement
-            curl -X POST "$HOOK_DEV"
+            curl -X POST -f -s -S "$HOOK_DEV" || echo "⚠️ Échec du déploiement en développement"
           fi
 
       # ÉTAPE 3 : Attendre que le déploiement se termine
@@ -106,6 +119,9 @@ jobs:
 
       # ÉTAPE 4 : Vérifier que l'API fonctionne (health check)
       - name: Health check
+        env:
+          # BRANCH : nom de la branche actuelle (réutilisé)
+          BRANCH: ${{ github.ref_name }}
         run: |
           # Déterminer l'URL selon la branche
           if [ "$BRANCH" = "main" ]; then
@@ -118,10 +134,15 @@ jobs:
           
           # Vérifier que l'URL est définie
           # -n : vérifie que la variable n'est pas vide
-          if [ -n "$URL" ]; then
-            echo "🔍 Vérification de la santé de l'API..."
-            # curl -f : échoue si le code HTTP n'est pas 2xx
-            # || echo : si curl échoue, affiche un message d'avertissement
-            # Cela n'arrête pas le workflow (pas d'erreur fatale)
-            curl -f "$URL/health" || echo "⚠️ Health check failed"
+          if [ -z "$URL" ]; then
+            echo "⚠️ URL de l'API non définie. Health check ignoré."
+            exit 0
           fi
+          
+          echo "🔍 Vérification de la santé de l'API à $URL/health..."
+          # curl -f : échoue si le code HTTP n'est pas 2xx
+          # -s : mode silencieux
+          # -S : affiche les erreurs même en mode silencieux
+          # || echo : si curl échoue, affiche un message d'avertissement
+          # Cela n'arrête pas le workflow (pas d'erreur fatale)
+          curl -f -s -S "$URL/health" || echo "⚠️ Health check failed (l'API n'est peut-être pas encore déployée)"
