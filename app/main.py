@@ -149,7 +149,7 @@ def read_root():
     QU'EST-CE QU'UN ENDPOINT RACINE ?
     ==================================
     L'endpoint "/" est la page d'accueil de l'API.
-    Quand quelqu'un accède à http://votre-api.com/, c'est cette fonction qui répond.
+    Quand quelqu'un accède à https://docker-ml-fastapi.onrender.com, c'est cette fonction qui répond.
     
     UTILITÉ :
     =========
@@ -549,7 +549,7 @@ async def trigger_training(authorization: str = Header(None)):
     
     EXEMPLE D'UTILISATION :
     =======================
-    curl -X POST https://votre-api.render.com/admin/train-model \
+    curl -X POST https://docker-ml-fastapi.onrender.com/admin/train-model/ \
       -H "Authorization: Bearer votre-token-secret"
     """
     import subprocess
@@ -629,17 +629,17 @@ async def trigger_training(authorization: str = Header(None)):
             status_code=500,
             detail=f"Erreur lors du démarrage de l'entraînement: {str(e)}"
         )
-@app.get("/debug/tables")
-def debug_tables():
-    import psycopg2
-    import os
-    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-    cur = conn.cursor()
-    cur.execute("""SELECT table_schema, table_name   
-                FROM information_schema.tables
-                WHERE table_type='BASE TABLE'
-                AND table_schema NOT IN ('pg_catalog', 'information_schema')
-                ORDER BY table_schema, table_name;""")
-    rows = cur.fetchall()
-    return rows
+# @app.get("/debug/tables")
+# def debug_tables():
+#     import psycopg2
+#     import os
+#     conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+#     cur = conn.cursor()
+#     cur.execute("""SELECT table_schema, table_name   
+#                 FROM information_schema.tables
+#                 WHERE table_type='BASE TABLE'
+#                 AND table_schema NOT IN ('pg_catalog', 'information_schema')
+#                 ORDER BY table_schema, table_name;""")
+#     rows = cur.fetchall()
+#     return rows
 

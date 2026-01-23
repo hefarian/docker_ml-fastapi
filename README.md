@@ -34,27 +34,35 @@ Ce projet déploie un modèle de machine learning (XGBoost) pour prédire l'attr
 
 ```
 docker_ml-fastapi/
+├── .github/workflows/
+│   ├── ci.yml                  # Github Action : Intégration continue
+│   └── deploy-render.yml       # Github Action : Déploiement continu sur render.com
 ├── app/
-│   ├── main.py              # API FastAPI principale
-│   ├── model.py             # Chargement et utilisation du modèle
-│   ├── schemas.py           # Schémas Pydantic
-│   ├── settings.py          # Configuration
-│   ├── database.py          # Gestion PostgreSQL
-│   ├── train_model.py       # Script d'entraînement
-│   └── requirements.txt     # Dépendances Python
+│   ├── main.py                 # API FastAPI principale
+│   ├── model.py                # Chargement et utilisation du modèle
+│   ├── schemas.py              # Schémas Pydantic
+│   ├── settings.py             # Configuration
+│   ├── database.py             # Gestion PostgreSQL
+│   ├── train_model.py          # Script d'entraînement
+│   └── requirements.txt        # Dépendances Python
 ├── db/
-│   ├── db.py                # Utilitaires SQLAlchemy
+│   ├── db.py                   # Utilitaires SQLAlchemy
 │   └── init/
-│       └── attrition.sql    # Script SQL avec données
+│       ├── attrition.sql       # Script SQL avec données
+│       └── prediction.sql      # Script SQL de création de la table predictions
 ├── tests/
-│   └── test_api.py          # Tests unitaires
-├── models/                  # Modèles entraînés (généré)
-├── .github/workflows/       # CI/CD
-│   ├── ci.yml              # Tests automatiques
-│   ├── train_model.yml      # Entraînement automatique
-│   └── deploy-render.yml    # Déploiement Render
+│   └── test_api.py             # Tests unitaires
+├── models/                     # Modèles entraînés 
+│   ├── feature_names.joblib    # Une liste Python des noms de colonnes exactement dans l’ordre que le modèle a vu pendant l’entraînement
+│   ├── one_hot_encoder.joblib  # L’objet OneHotEncoder (scikit‑learn) déjà fit : catégories apprises, gestion des valeurs inconnues, noms des colonnes générées.
+│   ├── ordinal_encoder.joblib  # L’objet OrdinalEncoder (scikit‑learn) déjà fit : mapping catégorie → entier (et la stratégie pour valeurs inconnues).
+│   ├── xgb_best_params.joblib  # les meilleurs hyperparamètres trouvés par Optuna
+│   └── xgb_booster.json        # Le booster XGBoost entraîné (structure des arbres, poids des feuilles, paramètres internes) sérialisé en JSON.
 ├── Dockerfile
 ├── docker-compose.yml
+├── GUIDE_TESTS.md
+├── pyproject.toml              # Fichier de configuration de pytest pour le projet en Python
+├── pytest.ini                  # Fichier de configuration de pytest pour le projet sous Windows
 └── README.md
 ```
 
@@ -69,7 +77,7 @@ docker_ml-fastapi/
 
 ```bash
 # Cloner le dépôt
-git clone <votre-repo>
+git clone https://github.com/hefarian/docker_ml-fastapi
 cd docker_ml-fastapi
 
 # Démarrer les services
@@ -129,10 +137,6 @@ pytest tests/ --cov=app --cov-report=html
 
 ## 🎯 Entraînement du modèle
 
-Voir [GUIDE_TRAIN_DEPLOY.md](GUIDE_TRAIN_DEPLOY.md) pour le guide complet.
-
-### Exécution rapide
-
 ```bash
 # Localement
 export DATABASE_URL=postgresql://postgres:password@localhost:5432/mydatabase
@@ -145,9 +149,6 @@ docker-compose run --rm \
   api python train_model.py
 ```
 
-## 🚀 Déploiement
-
-Voir [GUIDE_TRAIN_DEPLOY.md](GUIDE_TRAIN_DEPLOY.md) pour le guide complet.
 
 ### Déploiement sur Render.com
 
@@ -164,11 +165,7 @@ Voir [GUIDE_TRAIN_DEPLOY.md](GUIDE_TRAIN_DEPLOY.md) pour le guide complet.
    - Vérifie le linting et le formatage
    - Génère un rapport de couverture
 
-2. **Train Model** (`.github/workflows/train_model.yml`)
-   - Entraînement manuel ou automatique (hebdomadaire)
-   - Sauvegarde les modèles en artifacts
-
-3. **Deploy to Render** (`.github/workflows/deploy-render.yml`)
+2. **Deploy to Render** (`.github/workflows/deploy-render.yml`)
    - Déploiement automatique après tests réussis
    - Déploiement en dev (branche `dev`) ou prod (branche `main`)
 
@@ -183,9 +180,6 @@ Dans les paramètres du dépôt, ajouter :
 ## 📚 Documentation complète
 
 - [GUIDE_TESTS.md](GUIDE_TESTS.md) - Guide d'utilisation des tests
-- [GUIDE_TRAIN_DEPLOY.md](GUIDE_TRAIN_DEPLOY.md) - Guide d'entraînement et déploiement
-- [GUIDE_RENDER_TRAIN.md](GUIDE_RENDER_TRAIN.md) - Guide pour exécuter train_model.py sur Render.com
-
 ## 📄 Licence
 
 Ce projet est un projet de formation OpenClassrooms.
