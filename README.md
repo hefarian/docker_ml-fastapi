@@ -1,4 +1,4 @@
-# API de Prédiction d'Attrition - Machine Learning
+# API de Prédiction d'Attrition - Machine Learning V1.0.1
 
 API FastAPI pour prédire l'attrition des employés à l'aide d'un modèle XGBoost optimisé.
 
