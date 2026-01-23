@@ -85,11 +85,15 @@ jobs:
         
         # options : options de santé pour le conteneur
         # GitHub vérifie que PostgreSQL est prêt avant de continuer
+        # --health-cmd : commande pour vérifier la santé
+        # --health-interval : vérifie toutes les 10 secondes
+        # --health-timeout : timeout de 5 secondes
+        # --health-retries : réessaie 5 fois avant d'abandonner
         options: >-
-          --health-cmd pg_isready        # Commande pour vérifier la santé
-          --health-interval 10s          # Vérifie toutes les 10 secondes
-          --health-timeout 5s             # Timeout de 5 secondes
-          --health-retries 5              # Réessaie 5 fois avant d'abandonner
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     # steps : étapes à exécuter dans l'ordre
     steps:
