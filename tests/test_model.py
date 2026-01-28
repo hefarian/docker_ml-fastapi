@@ -185,7 +185,7 @@ class TestAttritionModel:
         # Mock des encodeurs avec des configurations plus réalistes
         mock_ohe = MagicMock()
         mock_ordinal = MagicMock()
-        
+
         # Liste de feature_names plus complète pour simuler la vraie transformation
         # Après get_dummies et les transformations, on aura beaucoup de colonnes
         mock_feature_names = [
@@ -235,7 +235,7 @@ class TestAttritionModel:
 
         mock_ohe.transform.return_value = np.array([[1, 1, 1, 1]])  # 4 colonnes encodées
         mock_ohe.get_feature_names_out.side_effect = get_feature_names_out_side_effect
-        
+
         # Configurer le mock Ordinal pour frequence_deplacement
         mock_ordinal.transform.return_value = np.array([[2]])  # Frequent = 2
 
@@ -290,13 +290,13 @@ class TestAttritionModel:
             frequence_deplacement="Frequent",
             annees_depuis_la_derniere_promotion=2,
             annes_sous_responsable_actuel=0,
-            augmentation_salaire_precedente=1
+            augmentation_salaire_precedente=1,
         )
 
         # Tester la transformation
         # Note : Cette transformation est très complexe car elle reproduit exactement
         # le pipeline d'entraînement. Les mocks doivent être très précis pour que ça fonctionne.
-        # 
+        #
         # PROBLÈME POTENTIEL :
         # ====================
         # - pd.get_dummies() crée des colonnes dynamiquement basées sur les valeurs
